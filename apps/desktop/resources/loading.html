@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Witseek 启动中</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%;
+        background: #0b0d10;
+        color: #e6e9ee;
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 32px; }
+      .logo { width: 72px; height: 72px; border-radius: 18px; }
+      h1 { margin: 4px 0 0; font-size: 22px; font-weight: 650; letter-spacing: .5px; }
+      .sub { margin: 0; color: #9aa4b2; font-size: 14px; }
+      .spinner {
+        margin-top: 8px; width: 30px; height: 30px; border-radius: 50%;
+        border: 3px solid rgba(47,129,247,.22); border-top-color: #2f81f7;
+        animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .state { margin-top: 6px; font-size: 13px; color: #c4ccd8; min-height: 18px; text-align: center; }
+      .log {
+        margin-top: 14px; width: min(720px, 92vw); max-height: 180px; overflow: hidden;
+        background: #0e1319; border: 1px solid #1c232d; border-radius: 10px;
+        padding: 10px 12px; font: 11px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace;
+        color: #76818f; white-space: pre-wrap; word-break: break-word;
+      }
+      .hint { margin-top: 10px; font-size: 12px; color: #6b7480; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <img class="logo" src="icon.png" alt="Witseek" />
+      <h1>Witseek</h1>
+      <p class="sub">由 DeepSeek Harness 驱动的桌面智能体</p>
+      <div class="spinner"></div>
+      <div class="state" id="state">正在初始化…</div>
+      <div class="log" id="log"></div>
+      <div class="hint">首次启动需要准备内置运行时，请稍候；模型 API Key 可在启动后的 Settings → Models 中配置。</div>
+    </div>
+    <script>
+      const stateEl = document.getElementById('state')
+      const logEl = document.getElementById('log')
+      let logs = []
+      function renderState(s) {
+        if (!s) return
+        if (s.message) stateEl.textContent = s.message
+      }
+      function appendLog(t) {
+        logs.push(t)
+        const joined = logs.join('')
+        if (joined.length > 4000) logs = [joined.slice(-3000)]
+        logEl.textContent = logs.join('').trim().slice(-1200)
+        logEl.scrollTop = logEl.scrollHeight
+      }
+      const api = window.witseekShell
+      if (api) {
+        api.getState().then(renderState).catch(() => {})
+        api.onState(renderState)
+        api.onLog(appendLog)
+      } else {
+        stateEl.textContent = '未能加载壳桥接脚本，请重启应用。'
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,77 @@
+{
+  "name": "@witseek/desktop",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Witseek desktop — Electron shell that packages the official DeepSeek Harness (dsh) Web runtime, with a workspace file-preview sidebar and GitHub auto-update",
+  "main": "./out/main/index.mjs",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "prepare:runtime": "node scripts/prepare-runtime-win.mjs",
+    "dist:win": "electron-builder --win dir",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "highlight.js": "^11.10.0",
+    "marked": "^14.1.4",
+    "resedit": "^3.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "build": {
+    "appId": "com.witseek.desktop",
+    "productName": "Witseek",
+    "copyright": "Copyright © 2026 Witseek; powered by DeepSeek Harness (MIT)",
+    "directories": {
+      "output": "../../artifacts",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/loading.html",
+        "to": "shell/loading.html"
+      },
+      {
+        "from": "resources/error.html",
+        "to": "shell/error.html"
+      },
+      {
+        "from": "resources/icon.png",
+        "to": "shell/icon.png"
+      }
+    ],
+    "afterPack": "./afterPack.cjs",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "wentao1176",
+        "repo": "Witseek"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.ico",
+      "executableName": "Witseek",
+      "signAndEditExecutable": false
+    }
+  }
+}

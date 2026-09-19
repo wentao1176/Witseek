@@ -1,0 +1,54 @@
+# ---------- 依赖 ----------
+node_modules/
+.pnpm-store/
+.cache/
+
+# ---------- 构建产物 ----------
+artifacts/
+apps/desktop/out/
+apps/desktop/dist/
+apps/desktop/.runtime-build/
+packages/*/dist/
+packages/*/out/
+*.tsbuildinfo
+*.blockmap
+*.nsi
+
+# ---------- 内置官方 dsh 运行时 staging（体积巨大，由脚本重建，不入仓库） ----------
+runtime/
+
+# ---------- 上游官方源码（第三方，按脚本需要另行拉取） ----------
+upstream/
+
+# ---------- 本地运行时 / 截图 / 工具链 ----------
+.runtime/
+.tools/
+.relay/
+
+# ---------- 安装包 / 二进制 ----------
+*.exe
+*.dll
+*.node
+*.bin
+# 但保留源图与图标资源
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.jpeg
+!assets/**/*.ico
+!apps/desktop/resources/**/*.png
+!apps/desktop/resources/**/*.ico
+
+# ---------- 日志 / 环境 ----------
+*.log
+.env
+.env.*
+
+# ---------- 系统 / 编辑器 ----------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ---------- 本地便签 / 杂项（不入库） ----------
+/warning.md
+/Witseek.jpg

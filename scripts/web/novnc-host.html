@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Witseek · 远程桌面</title>
+<link rel="icon" href="witseek-icon.png">
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --brand: #3b6ef5;
+    --brand-soft: #6f9bff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  #screen {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    outline: none;
+  }
+  #screen canvas { image-rendering: auto; }
+
+  /* 连接遮罩 */
+  #overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px;
+    background: radial-gradient(120% 90% at 50% 30%, #16233d 0%, var(--bg) 70%);
+    transition: opacity .35s ease;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay img { width: 96px; height: 96px; filter: drop-shadow(0 8px 24px rgba(59,110,245,.45)); }
+  #brand { font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+  #brand span { color: var(--brand-soft); }
+  #status { font-size: 13px; color: var(--muted); min-height: 18px; }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+
+  /* 迷你工具条 */
+  #bar {
+    position: absolute; top: 10px; right: 10px; z-index: 20;
+    display: flex; gap: 6px; align-items: center;
+    background: rgba(22,27,34,.88); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 8px;
+    backdrop-filter: blur(8px);
+    opacity: .25; transition: opacity .2s;
+    font-size: 12px;
+  }
+  #bar:hover { opacity: 1; }
+  #bar button {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer;
+    font-family: inherit;
+  }
+  #bar button:hover { border-color: var(--brand); color: var(--brand-soft); }
+  #bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  #bar .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  #bar .dot.err { background: var(--err); }
+  #bar .sep { width: 1px; height: 16px; background: var(--border); }
+</style>
+</head>
+<body>
+  <div id="screen" tabindex="1"></div>
+
+  <div id="bar">
+    <span class="dot" id="dot"></span>
+    <span id="fps">–</span>
+    <span class="sep"></span>
+    <button id="btn-scale" title="自适应 / 原始尺寸">自适应</button>
+    <button id="btn-full" title="全屏">全屏</button>
+    <button id="btn-reconnect" title="重新连接">重连</button>
+  </div>
+
+  <div id="overlay">
+    <img src="witseek-icon.png" alt="Witseek">
+    <div id="brand">Wit<span>seek</span></div>
+    <div id="status">正在连接远程桌面…</div>
+  </div>
+
+<script type="module">
+import RFB from './core/rfb.js';
+
+const $ = (id) => document.getElementById(id);
+const screenEl = $('screen');
+const overlay  = $('overlay');
+const statusEl = $('status');
+const dotEl    = $('dot');
+const fpsEl    = $('fps');
+
+const qs = new URLSearchParams(location.search);
+const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+// websockify --web 模式下，WebSocket 端点默认挂在 /websockify
+const wsPath  = qs.get('path') || 'websockify';
+const wsUrl   = `${wsProto}://${location.host}/${wsPath}`;
+
+let rfb = null;
+let scaled = true;
+let fpsTimer = null;
+let frames = 0;
+
+function setStatus(text, kind = '') {
+  statusEl.textContent = text;
+  statusEl.className = kind;
+}
+
+function showOverlay() { overlay.classList.remove('hidden'); }
+function hideOverlay() { overlay.classList.add('hidden'); }
+
+function teardown() {
+  if (fpsTimer) { clearInterval(fpsTimer); fpsTimer = null; }
+  if (rfb) {
+    try { rfb.disconnect(); } catch (_) {}
+    rfb = null;
+  }
+  fpsEl.textContent = '–';
+}
+
+function connect() {
+  teardown();
+  showOverlay();
+  dotEl.className = 'dot';
+  setStatus('正在连接远程桌面…');
+
+  try {
+    rfb = new RFB(screenEl, wsUrl, { shared: true, wsProtocols: ['binary'] });
+  } catch (e) {
+    setStatus('初始化失败：' + e.message, 'err');
+    dotEl.className = 'dot err';
+    return;
+  }
+
+  rfb.scaleViewport   = scaled;
+  rfb.resizeSession   = false;
+  rfb.viewOnly        = false;
+  rfb.focusOnClick    = true;
+  rfb.clipViewport    = false;
+  rfb.background      = '#0d1117';
+
+  rfb.addEventListener('connect', () => {
+    hideOverlay();
+    dotEl.className = 'dot ok';
+    setStatus('已连接', 'ok');
+    frames = 0;
+    fpsTimer = setInterval(() => {
+      fpsEl.textContent = frames + ' fps';
+      frames = 0;
+    }, 1000);
+    screenEl.focus();
+  });
+
+  rfb.addEventListener('disconnect', (e) => {
+    teardown();
+    dotEl.className = 'dot err';
+    const why = e.detail && e.detail.clean ? '连接已关闭' : '连接中断';
+    setStatus(why + '，点击「重连」重试', 'err');
+    showOverlay();
+  });
+
+  rfb.addEventListener('credentialsrequired', () => {
+    setStatus('需要密码', 'err');
+  });
+
+  rfb.addEventListener('securityfailure', (e) => {
+    setStatus('认证失败：' + (e.detail && e.detail.reason || '未知原因'), 'err');
+    dotEl.className = 'dot err';
+  });
+
+  rfb.addEventListener('desktopname', (e) => {
+    if (e.detail && e.detail.name) document.title = `Witseek · ${e.detail.name}`;
+  });
+
+  rfb.addEventListener('frameupdate', () => { frames++; });
+}
+
+$('btn-scale').addEventListener('click', () => {
+  scaled = !scaled;
+  if (rfb) rfb.scaleViewport = scaled;
+  $('btn-scale').textContent = scaled ? '自适应' : '原始尺寸';
+});
+
+$('btn-full').addEventListener('click', () => {
+  const el = document.documentElement;
+  if (!document.fullscreenElement) { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+  else { document.exitFullscreen(); }
+});
+
+$('btn-reconnect').addEventListener('click', connect);
+
+window.addEventListener('resize', () => { if (rfb) rfb.scaleViewport = scaled; });
+window.addEventListener('beforeunload', teardown);
+
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 10+ 默认不执行依赖的安装脚本。Electron 的二进制靠 postinstall 下载，
+# esbuild 需要安装原生二进制，node-pty 需要在安装期针对 Node 编译原生模块，
+# 三者必须放行。electron-winstaller 是 electron-builder 的 Squirrel 组件，
+# 本项目用自定义 NSIS，显式关闭其安装脚本。
+# pnpm 12 起的设置名是 allowBuilds（映射），pnpm 11.7 已兼容该 map。
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  node-pty: true

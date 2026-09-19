@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ws: http://127.0.0.1:*"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>文件预览</title>
+  </head>
+  <body>
+    <div id="resizer" class="resizer" title="拖拽调整宽度"></div>
+    <div class="app">
+      <header class="toolbar">
+        <div class="tb-titles">
+          <span class="tb-title">文件预览</span>
+          <span id="ws-name" class="ws-name" title=""></span>
+        </div>
+        <div class="tb-btns">
+          <button id="btn-pick" class="btn" title="选择工作区外的任意文件">打开文件</button>
+          <button id="btn-refresh" class="btn icon-btn" title="刷新文件树">刷新</button>
+          <button id="btn-root" class="btn icon-btn" title="在系统文件管理器中打开工作区">目录</button>
+        </div>
+      </header>
+
+      <section id="tree-panel" class="panel tree-panel">
+        <div class="pane-head">
+          <span class="pane-title">工作区文件</span>
+          <button id="btn-tree-collapse" class="mini-btn" title="折叠/展开文件树">收起</button>
+        </div>
+        <div id="tree" class="tree" aria-label="工作区文件树"></div>
+      </section>
+
+      <section class="panel preview-panel">
+        <div class="pane-head preview-head">
+          <span id="preview-name" class="file-name">未选择文件</span>
+          <span id="preview-meta" class="file-meta"></span>
+          <span class="spacer"></span>
+          <button id="btn-open-system" class="mini-btn" hidden>在系统中打开</button>
+        </div>
+        <div id="preview-body" class="preview-body">
+          <div id="empty" class="empty">
+            <div class="empty-doc" aria-hidden="true"></div>
+            <p class="empty-title">尚未选择文件</p>
+            <p class="empty-sub">从上方文件树选择工作区文件，或点击“打开文件”选择任意文件。</p>
+            <p class="empty-sub">支持代码 / 文本 / Markdown / 图片预览。</p>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="./preview.ts"></script>
+  </body>
+</html>

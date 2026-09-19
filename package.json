@@ -1,0 +1,23 @@
+{
+  "name": "witseek",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DeepSeek harness desktop application",
+  "scripts": {
+    "dev": "pnpm --filter @witseek/desktop dev",
+    "build": "pnpm --filter @witseek/desktop build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo:kernel": "tsx scripts/demo-kernel.mts"
+  },
+  "devDependencies": {
+    "@witseek/harness-core": "workspace:*",
+    "@witseek/provider-deepseek": "workspace:*",
+    "@witseek/tools": "workspace:*",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

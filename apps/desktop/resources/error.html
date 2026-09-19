@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Witseek 启动失败</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%;
+        background: #0b0d10; color: #e6e9ee;
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 32px; }
+      .card {
+        width: min(640px, 94vw); background: #12161c; border: 1px solid #232b36;
+        border-radius: 16px; padding: 30px 30px 24px;
+      }
+      .head { display: flex; align-items: center; gap: 14px; }
+      .logo { width: 46px; height: 46px; border-radius: 12px; }
+      h1 { font-size: 19px; margin: 0; font-weight: 650; }
+      .badge { font-size: 12px; color: #f0a65a; margin-top: 3px; }
+      .msg {
+        margin: 18px 0 8px; padding: 12px 14px; background: #0e1319;
+        border: 1px solid #202834; border-radius: 10px; color: #d7dde6;
+        font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+      }
+      details { margin: 6px 0 18px; }
+      summary { cursor: pointer; color: #8b95a3; font-size: 12.5px; }
+      pre {
+        margin: 10px 0 0; max-height: 200px; overflow: auto; background: #0b0f14;
+        border: 1px solid #1c232d; border-radius: 10px; padding: 10px 12px;
+        font: 11px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; color: #8b95a3;
+        white-space: pre-wrap; word-break: break-word;
+      }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      button {
+        appearance: none; border: 1px solid #2b3645; background: #1b232e; color: #e6e9ee;
+        padding: 9px 18px; border-radius: 9px; font-size: 13.5px; cursor: pointer;
+      }
+      button.primary { background: #2f81f7; border-color: #2f81f7; color: #fff; }
+      button:hover { filter: brightness(1.08); }
+      .foot { margin-top: 16px; font-size: 12px; color: #6b7480; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="head">
+          <img class="logo" src="icon.png" alt="Witseek" />
+          <div>
+            <h1>无法启动 Witseek 运行时</h1>
+            <div class="badge">DeepSeek Harness (dsh)</div>
+          </div>
+        </div>
+        <div class="msg" id="msg">正在读取错误信息…</div>
+        <details>
+          <summary>查看运行日志</summary>
+          <pre id="log"></pre>
+        </details>
+        <div class="actions">
+          <button class="primary" id="retry">重试启动</button>
+          <button id="openData">打开数据目录</button>
+          <button id="openWorkspace">打开工作区</button>
+        </div>
+        <div class="foot">
+          数据目录保存配置、API Key（.credentials.yaml）与已安装插件，可在备份后删除其中的
+          dsh-home 以重置配置。若反复失败，请确认安装完整后重试。
+        </div>
+      </div>
+    </div>
+    <script>
+      const msgEl = document.getElementById('msg')
+      const logEl = document.getElementById('log')
+      let logs = []
+      function appendLog(t) {
+        logs.push(t)
+        const joined = logs.join('')
+        if (joined.length > 5000) logs = [joined.slice(-4000)]
+        logEl.textContent = logs.join('').trim().slice(-3000)
+      }
+      const api = window.witseekShell
+      async function init() {
+        if (!api) { msgEl.textContent = '未能加载壳桥接脚本，请重启应用。'; return }
+        api.onLog(appendLog)
+        api.onState((s) => { if (s && s.message) msgEl.textContent = s.message })
+        try {
+          const s = await api.getState()
+          if (s && s.message) msgEl.textContent = s.message
+        } catch (_) {}
+      }
+      document.getElementById('retry').addEventListener('click', (e) => {
+        e.target.textContent = '正在重启…'
+        api && api.retry()
+      })
+      document.getElementById('openData').addEventListener('click', () => api && api.openDataFolder())
+      document.getElementById('openWorkspace').addEventListener('click', () => api && api.openWorkspace())
+      init()
+    </script>
+  </body>
+</html>
