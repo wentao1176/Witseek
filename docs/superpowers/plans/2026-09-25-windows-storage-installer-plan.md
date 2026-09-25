@@ -81,11 +81,12 @@
 **Interfaces:**
 - The installer default becomes `$PROFILE\.dsh\WitseekApp`.
 - `.onInit` reads the previous HKCU install path: redirect the exact old default `$LOCALAPPDATA\Programs\Witseek` to the new default; keep any other recorded custom path.
-- The installer and application derive the same sibling cache path. Reject installation and uninstall paths that equal, contain, or sit inside the registered dsh home or workspace. Uninstall removes a cache only when its recorded path matches the current derived sibling and its ownership flag is set; it removes the program directory only after the overlap guard passes.
+- The installer and application derive the same sibling cache path. Reject installation and uninstall paths, including the derived cache path, that equal, contain, or sit inside the registered dsh home or workspace. Accept only empty install directories or the registered current Witseek install. Uninstall removes only packaged files and empty directories; remove a cache only when its recorded path matches the current derived sibling, its ownership flag is set, and it does not overlap protected data.
 
 - [ ] Remove the old unconditional `InstallDirRegKey` behavior and add deterministic `.onInit` handling for the old default versus custom path.
 - [ ] Preserve `RequestExecutionLevel user`, HKCU-only registration, the editable directory page, and the Witseek icon on shortcuts.
-- [ ] Record the derived cache path and ownership for uninstall; delete it only when both still match the current install. Store the resolved dsh home and workspace paths, and reject installation/uninstall paths that overlap either protected data path.
+- [ ] Record the derived cache path and ownership for uninstall; delete it only when both still match the current install and the cache does not overlap protected data. Store resolved dsh home/workspace paths; reject install/cache overlap and accept only a new empty directory or the registered Witseek install path.
+- [ ] Generate exact file removals from the packaged payload; remove directories non-recursively from deepest to shallowest so extra user files survive uninstall and old-default cleanup.
 - [ ] Build the NSIS output in Task 4. Expected: `makensis` exits 0 and the script contains the `.dsh\WitseekApp` default and per-user execution level.
 
 ### Task 4: Refresh the supplied icon, version, docs, and Windows package
