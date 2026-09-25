@@ -47,8 +47,22 @@ module.exports = async function afterPack(context) {
     const iconFile = Data.IconFile.from(fs.readFileSync(icoPath))
     // IconFile.icons 元素是 { ...meta, data: IconItem|RawIconItem } 包装，需取 .data
     const icons = iconFile.icons.map((item) => item.data)
-    Resource.IconGroupEntry.replaceIconsForResource(res.entries, 101, 1033, icons)
-    console.log(`[afterPack] 已替换图标: ${icoPath}（${icons.length} 个尺寸）`)
+    // Windows Shell 从主程序图标组 1 取桌面与任务栏图标。部分 Windows
+    // 输出还会带有次级图标组 101；若存在，也要同步替换。
+    for (const groupId of [1, 101]) {
+      const hasGroup = res.entries.some(
+        (entry) => entry.type === 14 && entry.id === groupId && entry.lang === 1033
+      )
+      if (!hasGroup) {
+        if (groupId === 1) {
+          throw new Error('[afterPack] 未找到 Windows 主程序图标组 1，拒绝生成默认图标的安装包')
+        }
+        console.warn(`[afterPack] 未找到安装器图标组 ${groupId}，跳过`)
+        continue
+      }
+      Resource.IconGroupEntry.replaceIconsForResource(res.entries, groupId, 1033, icons)
+      console.log(`[afterPack] 已替换图标组 ${groupId}: ${icoPath}（${icons.length} 个尺寸）`)
+    }
   } else {
     console.warn('[afterPack] 未找到 resources/icon.ico，图标保持 Electron 默认')
   }
