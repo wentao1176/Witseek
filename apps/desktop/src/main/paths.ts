@@ -19,6 +19,10 @@ export interface RuntimeLayout {
   dshDir: string
   /** dsh CLI 入口（lib/bin.js）的绝对路径 */
   dshBin: string
+  /** Witseek 的只读 dsh 组合补丁。 */
+  witseekPatchPath: string
+  /** 随应用交付的 Witseek Coding preset 根目录。 */
+  agentPresetRoot: string
 }
 
 export interface DataLayout {
@@ -58,10 +62,13 @@ export function runtimeLayout(): RuntimeLayout {
       packaged: true,
       nodeExecutable: path.join(root, isWin ? 'node.exe' : 'node'),
       dshDir,
-      dshBin: path.join(dshDir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+      dshBin: path.join(dshDir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+      witseekPatchPath: path.join(root, 'witseek.patch.yml'),
+      agentPresetRoot: path.join(root, 'agent-presets')
     }
   }
   const root = repoRoot()
+  const resources = path.join(root, 'apps', 'desktop', 'resources')
   const stage =
     isWin ? 'stage-win32' : process.platform === 'darwin' ? 'stage-darwin' : 'stage-linux'
   const dshDir = process.env.WITSEEK_DSH_DIR || path.join(root, 'runtime', stage, 'dsh')
@@ -69,7 +76,9 @@ export function runtimeLayout(): RuntimeLayout {
     packaged: false,
     nodeExecutable: process.env.WITSEEK_NODE || (isWin ? 'node.exe' : 'node'),
     dshDir,
-    dshBin: path.join(dshDir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+    dshBin: path.join(dshDir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    witseekPatchPath: path.join(resources, 'witseek.patch.yml'),
+    agentPresetRoot: path.join(resources, 'agent-presets')
   }
 }
 
@@ -104,6 +113,12 @@ export function checkLayout(layout: RuntimeLayout): string | null {
   }
   if (!existsSync(layout.dshBin)) {
     return `找不到 dsh 启动文件：${layout.dshBin}。请先准备运行时（prepare:runtime）。`
+  }
+  if (!existsSync(layout.witseekPatchPath)) {
+    return `找不到 Witseek dsh 补丁：${layout.witseekPatchPath}`
+  }
+  if (!existsSync(path.join(layout.agentPresetRoot, 'witseek-coding', 'agent.cordis.yml'))) {
+    return `找不到 Witseek Coding preset：${layout.agentPresetRoot}`
   }
   return null
 }

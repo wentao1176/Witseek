@@ -26,10 +26,16 @@
 
       <section id="tree-panel" class="panel tree-panel">
         <div class="pane-head">
-          <span class="pane-title">工作区文件</span>
+          <div class="panel-tabs" role="tablist" aria-label="工作区视图">
+            <button id="tab-files" class="mini-btn active" type="button" role="tab" aria-pressed="true">文件</button>
+            <button id="tab-git" class="mini-btn" type="button" role="tab" aria-pressed="false">Git 改动</button>
+          </div>
+          <span id="git-summary" class="git-summary"></span>
+          <button id="btn-git-refresh" class="mini-btn" type="button" title="刷新 Git 改动" hidden>刷新 Git</button>
           <button id="btn-tree-collapse" class="mini-btn" title="折叠/展开文件树">收起</button>
         </div>
         <div id="tree" class="tree" aria-label="工作区文件树"></div>
+        <div id="git-list" class="tree git-list" aria-label="Git 改动列表" hidden></div>
       </section>
 
       <section class="panel preview-panel">

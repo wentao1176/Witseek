@@ -36,6 +36,7 @@ import dart from 'highlight.js/lib/languages/dart'
 import protobuf from 'highlight.js/lib/languages/protobuf'
 import groovy from 'highlight.js/lib/languages/groovy'
 import dos from 'highlight.js/lib/languages/dos'
+import diff from 'highlight.js/lib/languages/diff'
 
 import './preview.css'
 
@@ -71,7 +72,8 @@ const registered: Record<string, RegisterLanguageFn> = {
   dart,
   protobuf,
   groovy,
-  dos
+  dos,
+  diff
 }
 for (const [name, mod] of Object.entries(registered)) {
   // highlight.js 语言模块导出为注册函数
@@ -118,11 +120,39 @@ interface PreviewApi {
   root: () => Promise<RootInfo>
   list: (rel: string) => Promise<ListResult>
   read: (rel: string) => Promise<PreviewResult>
+  gitStatus: () => Promise<GitStatus>
+  gitDiff: (rel: string) => Promise<GitDiff>
   pick: () => Promise<PreviewResult | null>
   openAbs: (abs: string) => Promise<unknown>
   openRoot: () => Promise<unknown>
   resize: (width: number) => Promise<number>
   onVisibility: (cb: (open: boolean) => void) => () => void
+  onWorkspace: (cb: (root: RootInfo) => void) => () => void
+}
+
+interface GitChange {
+  path: string
+  status: string
+  staged: boolean
+  unstaged: boolean
+  untracked: boolean
+  oldPath?: string
+}
+interface GitStatus {
+  available: boolean
+  root: string
+  branch: string
+  changes: GitChange[]
+  truncated: boolean
+  reason?: string
+}
+interface GitDiff {
+  path: string
+  staged: string
+  unstaged: string
+  untracked: boolean
+  truncated: boolean
+  note?: string
 }
 
 declare global {
@@ -139,6 +169,11 @@ const nameEl = document.getElementById('preview-name') as HTMLSpanElement
 const metaEl = document.getElementById('preview-meta') as HTMLSpanElement
 const openSystemBtn = document.getElementById('btn-open-system') as HTMLButtonElement
 const wsNameEl = document.getElementById('ws-name') as HTMLSpanElement
+const gitListEl = document.getElementById('git-list') as HTMLDivElement
+const gitSummaryEl = document.getElementById('git-summary') as HTMLSpanElement
+const gitRefreshBtn = document.getElementById('btn-git-refresh') as HTMLButtonElement
+const filesTab = document.getElementById('tab-files') as HTMLButtonElement
+const gitTab = document.getElementById('tab-git') as HTMLButtonElement
 
 interface TreeNode {
   loaded: boolean
@@ -148,6 +183,11 @@ interface TreeNode {
 const nodeMap = new Map<string, TreeNode>()
 let rootInfo: RootInfo | null = null
 let current: PreviewResult | null = null
+let fileCurrent: PreviewResult | null = null
+let selectedGitChange: GitChange | null = null
+let activePane: 'files' | 'git' = 'files'
+let gitSnapshot: GitStatus | null = null
+let workspaceEpoch = 0
 
 function escapeHtml(s: string): string {
   return s
@@ -221,12 +261,13 @@ function renderTree(): void {
   treeEl.appendChild(frag)
 }
 
-async function loadDir(rel: string): Promise<DirEntry[]> {
+async function loadDir(rel: string, epoch = workspaceEpoch): Promise<DirEntry[]> {
   const result = await api.list(rel)
-  return result.entries
+  return epoch === workspaceEpoch ? result.entries : []
 }
 
 async function toggleDir(rel: string): Promise<void> {
+  const epoch = workspaceEpoch
   let node = nodeMap.get(rel)
   if (!node) {
     node = { loaded: false, open: false, children: null }
@@ -234,7 +275,8 @@ async function toggleDir(rel: string): Promise<void> {
   }
   try {
     if (!node.loaded || node.children === null) {
-      node.children = await loadDir(rel)
+      node.children = await loadDir(rel, epoch)
+      if (epoch !== workspaceEpoch) return
       node.loaded = true
     }
     node.open = !node.open
@@ -245,15 +287,20 @@ async function toggleDir(rel: string): Promise<void> {
 }
 
 async function initTree(): Promise<void> {
+  const epoch = workspaceEpoch
   try {
-    rootInfo = await api.root()
-    wsNameEl.textContent = rootInfo.root
-    wsNameEl.title = rootInfo.root
+    const info = await api.root()
+    if (epoch !== workspaceEpoch) return
+    rootInfo = info
+    wsNameEl.textContent = info.root
+    wsNameEl.title = info.root
     nodeMap.set('', { loaded: true, open: true, children: null })
-    const entries = await loadDir('')
+    const entries = await loadDir('', epoch)
+    if (epoch !== workspaceEpoch) return
     nodeMap.get('')!.children = entries
     renderTree()
   } catch (err) {
+    if (epoch !== workspaceEpoch) return
     treeEl.innerHTML = ''
     const tip = document.createElement('div')
     tip.className = 'tree-error'
@@ -265,6 +312,7 @@ async function initTree(): Promise<void> {
 async function openFile(rel: string): Promise<void> {
   try {
     const result = await api.read(rel)
+    fileCurrent = result
     renderResult(result)
     renderTree()
   } catch (err) {
@@ -368,10 +416,188 @@ function renderResult(r: PreviewResult): void {
   bodyEl.appendChild(box)
 }
 
+function showGitMessage(message: string, className = 'tree-empty'): void {
+  gitListEl.innerHTML = ''
+  const tip = document.createElement('div')
+  tip.className = className
+  tip.textContent = message
+  gitListEl.appendChild(tip)
+}
+
+function renderGitStatus(status: GitStatus): void {
+  gitListEl.innerHTML = ''
+  gitSummaryEl.textContent = status.available
+    ? `${status.branch} · ${status.changes.length}${status.truncated ? '+' : ''} 项`
+    : 'Git 不可用'
+  gitSummaryEl.title = status.reason ?? status.branch
+  if (!status.available) {
+    showGitMessage(status.reason ?? '无法读取 Git 状态。', 'tree-error')
+    return
+  }
+  if (status.changes.length === 0) {
+    showGitMessage('工作区干净，没有未提交改动。')
+    return
+  }
+
+  const frag = document.createDocumentFragment()
+  for (const change of status.changes) {
+    const row = document.createElement('div')
+    row.className = 'git-row' + (selectedGitChange?.path === change.path ? ' selected' : '')
+    row.title = change.oldPath ? `${change.path} ← ${change.oldPath}` : change.path
+
+    const mark = document.createElement('span')
+    mark.className = `git-mark${change.untracked ? ' untracked' : ''}`
+    mark.textContent = change.status
+
+    const label = document.createElement('span')
+    label.className = 'node-label'
+    label.textContent = change.path
+
+    row.append(mark, label)
+    row.addEventListener('click', () => void openGitChange(change))
+    frag.appendChild(row)
+  }
+  gitListEl.appendChild(frag)
+  if (status.truncated) {
+    const tip = document.createElement('div')
+    tip.className = 'tree-empty'
+    tip.textContent = `仅显示前 ${status.changes.length} 项改动。`
+    gitListEl.appendChild(tip)
+  }
+}
+
+function appendGitDiffSection(title: string, text: string): void {
+  if (!text) return
+  const heading = document.createElement('div')
+  heading.className = 'git-diff-heading'
+  heading.textContent = title
+  const pre = document.createElement('pre')
+  pre.className = 'code git-code'
+  const code = document.createElement('code')
+  code.className = 'hljs language-diff'
+  code.innerHTML = codeHtml(text, 'diff')
+  pre.appendChild(code)
+  bodyEl.append(heading, pre)
+}
+
+function renderGitDiff(result: GitDiff): void {
+  current = null
+  nameEl.textContent = result.path
+  metaEl.textContent = result.untracked ? '未跟踪' : 'Git diff'
+  openSystemBtn.hidden = true
+  resetBody()
+
+  if (result.truncated) {
+    const banner = document.createElement('div')
+    banner.className = 'trunc-banner'
+    banner.textContent = 'Diff 较大，已截断显示。'
+    bodyEl.appendChild(banner)
+  }
+  if (result.note) {
+    const note = document.createElement('div')
+    note.className = 'unsupported'
+    note.textContent = result.note
+    bodyEl.appendChild(note)
+  }
+  appendGitDiffSection('暂存区', result.staged)
+  appendGitDiffSection(result.untracked ? '未跟踪文件' : '工作区', result.unstaged)
+  if (!result.staged && !result.unstaged && !result.note) {
+    const tip = document.createElement('div')
+    tip.className = 'empty'
+    tip.textContent = '此文件没有可显示的文本 diff。'
+    bodyEl.appendChild(tip)
+  }
+  bodyEl.scrollTop = 0
+}
+
+function showGitEmpty(message: string): void {
+  current = null
+  nameEl.textContent = '选择一项改动'
+  metaEl.textContent = ''
+  openSystemBtn.hidden = true
+  resetBody()
+  const tip = document.createElement('div')
+  tip.className = 'empty'
+  tip.textContent = message
+  bodyEl.appendChild(tip)
+}
+
+async function openGitChange(change: GitChange): Promise<void> {
+  selectedGitChange = change
+  if (gitSnapshot) renderGitStatus(gitSnapshot)
+  const epoch = workspaceEpoch
+  nameEl.textContent = change.path
+  metaEl.textContent = change.status
+  openSystemBtn.hidden = true
+  resetBody()
+  const loading = document.createElement('div')
+  loading.className = 'empty'
+  loading.textContent = '正在读取 diff…'
+  bodyEl.appendChild(loading)
+  try {
+    const result = await api.gitDiff(change.path)
+    if (epoch !== workspaceEpoch) return
+    renderGitDiff(result)
+  } catch (err) {
+    if (epoch !== workspaceEpoch) return
+    showError(err instanceof Error ? err.message : String(err))
+  }
+}
+
+async function loadGitStatus(): Promise<void> {
+  const epoch = workspaceEpoch
+  showGitMessage('正在读取 Git 改动…')
+  gitSummaryEl.textContent = '读取中…'
+  try {
+    const status = await api.gitStatus()
+    if (epoch !== workspaceEpoch) return
+    gitSnapshot = status
+    const selected = selectedGitChange
+      ? status.changes.find(change => change.path === selectedGitChange?.path)
+      : undefined
+    selectedGitChange = selected ?? null
+    renderGitStatus(status)
+    if (activePane === 'git') {
+      if (selected) void openGitChange(selected)
+      else showGitEmpty(status.available ? '从左侧选择一项改动查看 diff。' : status.reason ?? 'Git 状态不可用。')
+    }
+  } catch (err) {
+    if (epoch !== workspaceEpoch) return
+    gitSnapshot = null
+    gitSummaryEl.textContent = '读取失败'
+    showGitMessage(`读取 Git 状态失败：${err instanceof Error ? err.message : String(err)}`, 'tree-error')
+  }
+}
+
+function setPane(pane: 'files' | 'git'): void {
+  activePane = pane
+  const showGit = pane === 'git'
+  treeEl.hidden = showGit
+  gitListEl.hidden = !showGit
+  gitRefreshBtn.hidden = !showGit
+  filesTab.classList.toggle('active', !showGit)
+  gitTab.classList.toggle('active', showGit)
+  filesTab.setAttribute('aria-pressed', String(!showGit))
+  gitTab.setAttribute('aria-pressed', String(showGit))
+  if (showGit) {
+    if (!gitSnapshot) void loadGitStatus()
+    else {
+      renderGitStatus(gitSnapshot)
+      if (selectedGitChange) void openGitChange(selectedGitChange)
+      else showGitEmpty('从左侧选择一项改动查看 diff。')
+    }
+  } else if (fileCurrent) {
+    renderResult(fileCurrent)
+  } else {
+    showEmpty()
+  }
+}
+
 function initToolbar(): void {
   document.getElementById('btn-pick')!.addEventListener('click', async () => {
     const result = await api.pick()
     if (result) {
+      fileCurrent = result
       renderResult(result)
       renderTree()
     }
@@ -379,12 +605,19 @@ function initToolbar(): void {
   document.getElementById('btn-refresh')!.addEventListener('click', () => {
     nodeMap.clear()
     current = null
+    fileCurrent = null
+    gitSnapshot = null
+    selectedGitChange = null
     nameEl.textContent = '未选择文件'
     metaEl.textContent = ''
     openSystemBtn.hidden = true
     showEmpty()
     void initTree()
+    if (activePane === 'git') void loadGitStatus()
   })
+  filesTab.addEventListener('click', () => setPane('files'))
+  gitTab.addEventListener('click', () => setPane('git'))
+  gitRefreshBtn.addEventListener('click', () => void loadGitStatus())
   document.getElementById('btn-root')!.addEventListener('click', () => void api.openRoot())
   openSystemBtn.addEventListener('click', () => {
     if (current) void api.openAbs(current.abs)
@@ -434,6 +667,25 @@ if (!api) {
   initToolbar()
   initResizer()
   void initTree()
+  api.onWorkspace(info => {
+    workspaceEpoch += 1
+    nodeMap.clear()
+    current = null
+    fileCurrent = null
+    selectedGitChange = null
+    gitSnapshot = null
+    rootInfo = info
+    wsNameEl.textContent = info.root
+    wsNameEl.title = info.root
+    gitListEl.innerHTML = ''
+    gitSummaryEl.textContent = ''
+    nameEl.textContent = '未选择文件'
+    metaEl.textContent = ''
+    openSystemBtn.hidden = true
+    showEmpty()
+    void initTree()
+    if (activePane === 'git') void loadGitStatus()
+  })
   api.onVisibility(open => {
     if (open && !rootInfo) void initTree()
   })

@@ -74,11 +74,17 @@ function bootstrap(): void {
   views = createViews(win, {
     rendererEntry: data.rendererEntry,
     rendererIsUrl: data.rendererIsUrl,
-    previewPreload: data.previewPreload
+    previewPreload: data.previewPreload,
+    mainPreload: path.join(MODULE_DIR, '..', 'preload', 'desktopBridge.cjs')
   })
 
   wireMainView()
-  registerPreviewIpc(win, data)
+  registerPreviewIpc(
+    win,
+    data,
+    views.mainView.webContents,
+    root => views?.previewView.webContents.send('preview:workspace', root)
+  )
   ipcMain.handle('preview:resize', (_event, width: number) => {
     views?.setSidebarWidth(width)
     return views?.sidebarWidth ?? 0

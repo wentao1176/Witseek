@@ -115,6 +115,7 @@ module.exports = async function afterPack(context) {
   const required = [
     'node.exe',
     path.join('dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    path.join('dsh', 'node_modules', '@witseek', 'dsh-client-witseek-desktop', 'client.js'),
     path.join('dsh', 'node_modules', 'node-pty', 'prebuilds', 'win32-x64', 'conpty.node'),
     path.join('dsh', 'node_modules', '@img', 'sharp-win32-x64')
   ]
@@ -122,6 +123,16 @@ module.exports = async function afterPack(context) {
     if (!fs.existsSync(path.join(runtimeDst, rel))) {
       throw new Error(`[afterPack] 运行时复制后缺失关键文件: ${rel}`)
     }
+  }
+  for (const rel of [
+    path.join('agent-presets', 'witseek-coding', 'agent.cordis.yml'),
+    'witseek.patch.yml'
+  ]) {
+    const src = path.join(runtimeSrc, rel)
+    if (!fs.existsSync(src)) throw new Error(`[afterPack] 缺少 Witseek runtime resource: ${rel}`)
+    const dst = path.join(runtimeDst, rel)
+    fs.mkdirSync(path.dirname(dst), { recursive: true })
+    fs.cpSync(src, dst, { recursive: true, force: true })
   }
   console.log('[afterPack] 内置运行时已复制到 resources/runtime（node.exe + dsh 生产树）')
 }

@@ -50,8 +50,22 @@ export class DshRuntime extends EventEmitter {
 
     this.ready = false
     this.buffer = ''
-    const args = [this.layout.dshBin, 'web', '--no-open', '--host', '127.0.0.1', '--port', '0']
-    const env = { ...process.env, DSH_HOME: this.data.dshHome }
+    const args = [
+      this.layout.dshBin,
+      'web',
+      '--no-open',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '0',
+      '--patch',
+      this.layout.witseekPatchPath
+    ]
+    const env = {
+      ...process.env,
+      DSH_HOME: this.data.dshHome,
+      WITSEEK_AGENT_PRESET_ROOT: this.layout.agentPresetRoot
+    }
 
     this.setState({ status: 'starting', url: null, port: null, message: '正在启动 DeepSeek Harness 运行时…' })
     const child = spawn(this.layout.nodeExecutable, args, {

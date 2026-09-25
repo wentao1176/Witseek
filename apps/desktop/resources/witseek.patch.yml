@@ -1,0 +1,11 @@
+# Witseek's web additions layer over the pinned official dsh Web bundle.
+- insert:
+    - id: witseek-desktop-workspace
+      name: '@witseek/dsh-client-witseek-desktop'
+
+- id: agent-presets
+  config:
+    default: witseek-coding
+    roots:
+      - path: !!js process.env.WITSEEK_AGENT_PRESET_ROOT
+        trust: system

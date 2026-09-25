@@ -129,6 +129,36 @@ function copyDshTree() {
   })
 }
 
+function copyWitseekResources() {
+  const resources = path.join(APP_ROOT, 'resources')
+  const extensionSrc = path.join(resources, 'dsh-client-witseek-desktop')
+  const extensionDst = path.join(
+    DSH_OUT,
+    'node_modules',
+    '@witseek',
+    'dsh-client-witseek-desktop'
+  )
+  const presetSrc = path.join(resources, 'agent-presets')
+  const presetDst = path.join(OUT, 'agent-presets')
+  const patchSrc = path.join(resources, 'witseek.patch.yml')
+
+  if (!existsSync(path.join(extensionSrc, 'client.js'))) {
+    fail(`缺少 dsh 桌面桥接插件：${extensionSrc}`)
+  }
+  if (!existsSync(path.join(presetSrc, 'witseek-coding', 'agent.cordis.yml'))) {
+    fail(`缺少 Witseek Coding preset：${presetSrc}`)
+  }
+  if (!existsSync(patchSrc)) fail(`缺少 dsh 组合补丁：${patchSrc}`)
+
+  rmSync(extensionDst, { recursive: true, force: true })
+  mkdirSync(path.dirname(extensionDst), { recursive: true })
+  cpSync(extensionSrc, extensionDst, { recursive: true, force: true })
+  rmSync(presetDst, { recursive: true, force: true })
+  cpSync(presetSrc, presetDst, { recursive: true, force: true })
+  cpSync(patchSrc, path.join(OUT, 'witseek.patch.yml'))
+  console.log('[prepare-runtime] 已加入 Witseek preset、dsh 插件与组合补丁')
+}
+
 function mustExist(rel, label) {
   const p = path.join(DSH_OUT, rel)
   if (!existsSync(p)) fail(`缺少关键运行时文件（${label}）：${rel}`)
@@ -137,11 +167,20 @@ function mustExist(rel, label) {
 
 function verify() {
   mustExist(path.join('node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), 'dsh CLI 入口')
+  mustExist(path.join('node_modules', '@witseek', 'dsh-client-witseek-desktop', 'index.js'), 'Witseek dsh 宿主插件')
+  mustExist(path.join('node_modules', '@witseek', 'dsh-client-witseek-desktop', 'client.js'), 'Witseek dsh 客户端插件')
   mustExist(path.join('node_modules', 'node-pty', 'prebuilds', 'win32-x64', 'conpty.node'), 'node-pty conpty')
   mustExist(path.join('node_modules', '@vscode', 'ripgrep-win32-x64', 'bin', 'rg.exe'), 'ripgrep')
   const nodeExe = path.join(OUT, 'node.exe')
   if (!existsSync(nodeExe)) fail('缺少 node.exe')
   console.log('  ✓ node.exe')
+  for (const [rel, label] of [
+    ['witseek.patch.yml', 'Witseek dsh 组合补丁'],
+    [path.join('agent-presets', 'witseek-coding', 'agent.cordis.yml'), 'Witseek Coding preset']
+  ]) {
+    if (!existsSync(path.join(OUT, rel))) fail(`缺少关键运行时资源（${label}）：${rel}`)
+    console.log(`  ✓ ${label}`)
+  }
 
   // 这些包的具体文件名可能随版本变化，用 glob 风格校验
   const { globSync } = await_import_glob()
@@ -229,6 +268,7 @@ const nodeVersion = resolveNodeVersion(argVersion)
 mkdirSync(OUT, { recursive: true })
 provisionNode(nodeVersion)
 copyDshTree()
+copyWitseekResources()
 await Promise.resolve(verify())
 writeManifest(nodeVersion)
 console.log('[prepare-runtime] 完成：' + OUT)

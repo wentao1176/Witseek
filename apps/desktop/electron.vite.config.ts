@@ -29,7 +29,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
-          preview: resolve(__dirname, 'src/preload/preview.ts')
+          preview: resolve(__dirname, 'src/preload/preview.ts'),
+          desktopBridge: resolve(__dirname, 'src/preload/desktop-bridge.ts')
         },
         external: ['electron'],
         output: {

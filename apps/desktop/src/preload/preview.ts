@@ -6,10 +6,20 @@
 ;(() => {
   const { contextBridge, ipcRenderer } = require('electron')
 
+  interface RootInfo {
+    root: string
+    rel: string
+    sep: string
+    platform: string
+    name: string
+  }
+
   const api = {
     root: () => ipcRenderer.invoke('preview:root'),
     list: (rel: string) => ipcRenderer.invoke('preview:list', rel),
     read: (rel: string) => ipcRenderer.invoke('preview:read', rel),
+    gitStatus: () => ipcRenderer.invoke('preview:git-status'),
+    gitDiff: (rel: string) => ipcRenderer.invoke('preview:git-diff', rel),
     pick: () => ipcRenderer.invoke('preview:pick'),
     reveal: (rel: string) => ipcRenderer.invoke('preview:reveal', rel),
     open: (rel: string) => ipcRenderer.invoke('preview:open', rel),
@@ -21,6 +31,11 @@
       const handler = (_event: unknown, open: boolean) => cb(open)
       ipcRenderer.on('preview:visibility', handler)
       return () => ipcRenderer.removeListener('preview:visibility', handler)
+    },
+    onWorkspace: (cb: (root: RootInfo) => void) => {
+      const handler = (_event: unknown, root: RootInfo) => cb(root)
+      ipcRenderer.on('preview:workspace', handler)
+      return () => ipcRenderer.removeListener('preview:workspace', handler)
     }
   }
 

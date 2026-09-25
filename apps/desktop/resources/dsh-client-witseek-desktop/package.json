@@ -1,0 +1,22 @@
+{
+  "name": "@witseek/dsh-client-witseek-desktop",
+  "description": "Witseek Desktop bridge for following the active dsh session workspace",
+  "version": "0.4.0",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ],
+      "platform": "web"
+    }
+  }
+}

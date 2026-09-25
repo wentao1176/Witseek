@@ -42,5 +42,13 @@ pnpm install --ignore-scripts --registry https://registry.npmmirror.com \
 test -f node_modules/@deepseek-ai/dsh/lib/bin.js || { echo "dsh bin.js 缺失"; exit 1; }
 test -f node_modules/node-pty/prebuilds/win32-x64/conpty.node || { echo "node-pty win32 prebuild 缺失"; exit 1; }
 
+# Witseek 的只读工作区同步使用 dsh 官方 Web 客户端扩展点。
+PLUGIN_SRC="$ROOT/apps/desktop/resources/dsh-client-witseek-desktop"
+PLUGIN_DST="$ST/node_modules/@witseek/dsh-client-witseek-desktop"
+test -f "$PLUGIN_SRC/client.js" || { echo "Witseek dsh 客户端插件缺失"; exit 1; }
+mkdir -p "$(dirname "$PLUGIN_DST")"
+rm -rf "$PLUGIN_DST"
+cp -a "$PLUGIN_SRC" "$PLUGIN_DST"
+
 echo "[stage-win32] 就绪: $ST"
 du -sh node_modules

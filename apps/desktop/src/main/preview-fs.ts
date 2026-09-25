@@ -7,8 +7,9 @@
  *  - 唯一的例外是“打开文件…”系统选择框：由用户显式选择的文件才允许读取；
  *  - 文本设大小上限，图片转 data URL，其余二进制仅返回元信息并引导系统打开。
  */
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
+import { execFileSync } from 'node:child_process'
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { DataLayout } from './paths'
 
@@ -42,6 +43,9 @@ export interface PreviewResult {
 }
 
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
+const MAX_GIT_STATUS_BYTES = 8 * 1024 * 1024
+const MAX_GIT_DIFF_CHARS = 512 * 1024
+const MAX_GIT_CHANGES = 2000
 
 const IMAGE_EXT: Record<string, string> = {
   '.png': 'image/png',
@@ -135,19 +139,30 @@ const TEXT_BASENAMES: Record<string, string> = {
 function isWithin(root: string, abs: string): boolean {
   const normalizedRoot = path.resolve(root)
   const target = path.resolve(abs)
-  return target === normalizedRoot || target.startsWith(normalizedRoot + path.sep)
+  const relative = path.relative(normalizedRoot, target)
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
 }
 
-/** 把渲染层传来的 POSIX 风格相对路径安全地解析到工作区内的绝对路径 */
-function resolveInside(root: string, rel: string): string {
-  const parts = String(rel || '')
-    .split(/[\\/]/)
-    .filter(p => p.length > 0 && p !== '.' && p !== '..')
-  const abs = path.join(root, ...parts)
+/** 把渲染层传来的相对路径解析到工作区内，不允许绝对路径或父目录段。 */
+function resolveWorkspacePath(root: string, rel: string): string {
+  const raw = String(rel || '')
+  if (path.isAbsolute(raw) || /^[A-Za-z]:[\\/]/.test(raw) || /^[/\\]{2}/.test(raw)) {
+    throw new Error('路径越权：只能访问工作区目录内的文件')
+  }
+  const parts = raw.split(/[\\/]/).filter(p => p.length > 0 && p !== '.')
+  if (parts.includes('..')) throw new Error('路径越权：只能访问工作区目录内的文件')
+  const abs = path.resolve(root, ...parts)
   if (!isWithin(root, abs)) {
     throw new Error('路径越权：只能访问工作区目录内的文件')
   }
   return abs
+}
+
+function resolveInside(root: string, rel: string): string {
+  const abs = resolveWorkspacePath(root, rel)
+  const target = realpathSync(abs)
+  if (!isWithin(root, target)) throw new Error('路径越权：链接目标位于工作区之外')
+  return target
 }
 
 function toRel(root: string, abs: string): string {
@@ -171,9 +186,9 @@ function classify(fileName: string): PreviewKind {
   return 'binary'
 }
 
-function readAny(abs: string, rel: string): PreviewResult {
+function readAny(abs: string, rel: string, displayName = path.basename(abs)): PreviewResult {
   const st = statSync(abs)
-  const name = path.basename(abs)
+  const name = displayName
   const base = {
     name,
     abs,
@@ -224,22 +239,189 @@ function readAny(abs: string, rel: string): PreviewResult {
   }
 }
 
-export function registerPreviewIpc(win: BrowserWindow, data: DataLayout): void {
-  const root = path.resolve(data.workspace)
+interface RootInfo {
+  root: string
+  rel: string
+  sep: string
+  platform: string
+  name: string
+}
+
+interface GitChange {
+  path: string
+  status: string
+  staged: boolean
+  unstaged: boolean
+  untracked: boolean
+  oldPath?: string
+}
+
+interface GitStatus {
+  available: boolean
+  root: string
+  branch: string
+  changes: GitChange[]
+  truncated: boolean
+  reason?: string
+}
+
+interface GitDiff {
+  path: string
+  staged: string
+  unstaged: string
+  untracked: boolean
+  truncated: boolean
+  note?: string
+}
+
+function gitOutput(cwd: string, args: string[]): string {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: MAX_GIT_STATUS_BYTES,
+    windowsHide: true
+  })
+}
+
+function boundDiff(value: string): { text: string; truncated: boolean } {
+  if (value.length <= MAX_GIT_DIFF_CHARS) return { text: value, truncated: false }
+  return { text: value.slice(0, MAX_GIT_DIFF_CHARS), truncated: true }
+}
+
+function repoPathToWorkspacePath(workspace: string, repoRoot: string, relative: string): string | undefined {
+  const abs = path.resolve(repoRoot, ...relative.split(/[\\/]/))
+  if (!isWithin(workspace, abs)) return undefined
+  return toRel(workspace, abs)
+}
+
+function readGitStatus(workspace: string): GitStatus {
+  try {
+    const repoRoot = gitOutput(workspace, ['rev-parse', '--show-toplevel']).trim()
+    const branch = gitOutput(repoRoot, ['branch', '--show-current']).trim() || 'HEAD (detached)'
+    const raw = gitOutput(repoRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+    const records = raw.split('\0')
+    const changes: GitChange[] = []
+    let truncated = false
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index]
+      if (!record || record.length < 4) continue
+      const status = record.slice(0, 2)
+      const repoPath = record.slice(3)
+      const relative = repoPathToWorkspacePath(workspace, repoRoot, repoPath)
+      let oldPath: string | undefined
+      if (status.includes('R') || status.includes('C')) {
+        const oldRepoPath = records[index + 1]
+        index += 1
+        if (oldRepoPath) oldPath = repoPathToWorkspacePath(workspace, repoRoot, oldRepoPath)
+      }
+      if (relative === undefined) continue
+      if (changes.length >= MAX_GIT_CHANGES) {
+        truncated = true
+        break
+      }
+      changes.push({
+        path: relative,
+        status,
+        staged: status[0] !== ' ' && status[0] !== '?',
+        unstaged: status[1] !== ' ',
+        untracked: status === '??',
+        ...(oldPath === undefined ? {} : { oldPath })
+      })
+    }
+    return { available: true, root: workspace, branch, changes, truncated }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const reason = /ENOENT|not recognized|找不到指定/i.test(message)
+      ? '未检测到 Git。安装 Git for Windows 并重启 Witseek 后可查看改动。'
+      : '当前工作区不是可用的 Git 仓库。'
+    return { available: false, root: workspace, branch: '', changes: [], truncated: false, reason }
+  }
+}
+
+function readGitDiff(workspace: string, rel: string): GitDiff {
+  const abs = resolveWorkspacePath(workspace, rel)
+  const repoRoot = gitOutput(workspace, ['rev-parse', '--show-toplevel']).trim()
+  if (!isWithin(repoRoot, abs)) throw new Error('文件不属于当前 Git 仓库')
+  const repoRel = toRel(repoRoot, abs)
+  const stagedRaw = gitOutput(repoRoot, ['diff', '--cached', '--no-ext-diff', '--unified=3', '--', repoRel])
+  const unstagedRaw = gitOutput(repoRoot, ['diff', '--no-ext-diff', '--unified=3', '--', repoRel])
+  const statusRaw = gitOutput(repoRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', repoRel])
+  const untracked = statusRaw.split('\0').some(record => record.startsWith('?? ') && record.slice(3) === repoRel)
+  let staged = stagedRaw
+  let unstaged = unstagedRaw
+  let truncated = false
+  let note: string | undefined
+  if (untracked) {
+    try {
+      const preview = readAny(resolveInside(workspace, rel), rel)
+      if (preview.kind === 'text' || preview.kind === 'markdown') {
+        const lines = (preview.text ?? '').replace(/\r\n/g, '\n').split('\n')
+        const header = `diff --git a/${repoRel} b/${repoRel}\nnew file mode 100644\n--- /dev/null\n+++ b/${repoRel}\n@@ -0,0 +1,${lines.length} @@\n`
+        unstaged = `${header}${lines.map(line => `+${line}`).join('\n')}`
+        truncated = Boolean(preview.truncated)
+      } else {
+        note = '未跟踪文件为二进制格式，无法生成文本 diff。'
+      }
+    } catch (error) {
+      note = error instanceof Error ? error.message : String(error)
+    }
+  }
+  const boundedStaged = boundDiff(staged)
+  const boundedUnstaged = boundDiff(unstaged)
+  staged = boundedStaged.text
+  unstaged = boundedUnstaged.text
+  truncated ||= boundedStaged.truncated || boundedUnstaged.truncated
+  return { path: rel, staged, unstaged, untracked, truncated, ...(note === undefined ? {} : { note }) }
+}
+
+export function registerPreviewIpc(
+  win: BrowserWindow,
+  data: DataLayout,
+  dshContents: WebContents,
+  onWorkspaceChange: (info: RootInfo) => void
+): void {
+  const fallbackRoot = realpathSync(data.workspace)
+  let root = fallbackRoot
   // 用户通过“打开文件…”系统选择框显式选中的工作区外文件，会话内允许系统打开/定位
   const granted = new Set<string>()
 
-  function canTouch(abs: string): boolean {
-    return isWithin(root, abs) || granted.has(path.resolve(abs))
+  function rootInfo(): RootInfo {
+    return { root, rel: '', sep: '/', platform: process.platform, name: path.basename(root) }
   }
 
-  ipcMain.handle('preview:root', () => ({
-    root,
-    rel: '',
-    sep: '/',
-    platform: process.platform,
-    name: path.basename(root)
-  }))
+  function setWorkspace(candidate: unknown): RootInfo {
+    if (candidate !== null && (typeof candidate !== 'string' || !path.isAbsolute(candidate))) {
+      throw new Error('工作区路径必须是绝对路径')
+    }
+    const target = candidate === null ? fallbackRoot : realpathSync(path.resolve(candidate))
+    if (!statSync(target).isDirectory()) throw new Error('工作区路径不是文件夹')
+    const samePath = process.platform === 'win32'
+      ? target.toLocaleLowerCase() === root.toLocaleLowerCase()
+      : target === root
+    if (!samePath) {
+      root = target
+      granted.clear()
+      onWorkspaceChange(rootInfo())
+    }
+    return rootInfo()
+  }
+
+  function canTouch(abs: string): boolean {
+    const target = path.resolve(abs)
+    if (granted.has(target)) return true
+    try {
+      return isWithin(root, realpathSync(target))
+    } catch {
+      return false
+    }
+  }
+
+  ipcMain.handle('desktop:set-workspace', (event, candidate: unknown) => {
+    if (event.sender !== dshContents) throw new Error('工作区只能由 dsh 主视图更新')
+    return setWorkspace(candidate)
+  })
+
+  ipcMain.handle('preview:root', () => rootInfo())
 
   ipcMain.handle('preview:list', (_event, rel = '') => {
     const abs = resolveInside(root, rel)
@@ -275,7 +457,7 @@ export function registerPreviewIpc(win: BrowserWindow, data: DataLayout): void {
 
   ipcMain.handle('preview:read', (_event, rel: string) => {
     const abs = resolveInside(root, rel)
-    return readAny(abs, toRel(root, abs))
+    return readAny(abs, toRel(root, abs), path.basename(rel.replace(/[\\/]+$/, '')))
   })
 
   ipcMain.handle('preview:pick', async () => {
@@ -314,4 +496,8 @@ export function registerPreviewIpc(win: BrowserWindow, data: DataLayout): void {
   })
 
   ipcMain.handle('preview:open-root', () => shell.openPath(root))
+
+  ipcMain.handle('preview:git-status', () => readGitStatus(root))
+
+  ipcMain.handle('preview:git-diff', (_event, rel: string) => readGitDiff(root, rel))
 }

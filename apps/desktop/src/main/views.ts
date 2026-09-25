@@ -24,10 +24,16 @@ const MIN_SIDEBAR_WIDTH = 320
 
 export function createViews(
   win: BrowserWindow,
-  opts: { rendererEntry: string; rendererIsUrl: boolean; previewPreload: string }
+  opts: {
+    rendererEntry: string
+    rendererIsUrl: boolean
+    previewPreload: string
+    mainPreload: string
+  }
 ): ViewBundle {
   const mainView = new WebContentsView({
     webPreferences: {
+      preload: opts.mainPreload,
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
