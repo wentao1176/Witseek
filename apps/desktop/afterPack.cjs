@@ -30,41 +30,35 @@ module.exports = async function afterPack(context) {
   const exeName = `${appInfo.productFilename}.exe`
   const exePath = path.join(context.appOutDir, exeName)
   if (!fs.existsSync(exePath)) {
-    console.warn(`[afterPack] 未找到可执行文件，跳过 PE 资源改写: ${exePath}`)
-    return
+    throw new Error(`[afterPack] 未找到 Windows 主程序: ${exePath}`)
   }
 
   const exe = NtExecutable.from(fs.readFileSync(exePath))
   const res = NtExecutableResource.from(exe)
 
   // 1) 替换图标组（RT_GROUP_ICON id=101 / lang=1033）
-  const iconCandidates = [
-    path.join(__dirname, 'resources', 'icon.ico'),
-    path.join(context.appOutDir, 'resources', 'icon.ico')
-  ]
-  const icoPath = iconCandidates.find((p) => fs.existsSync(p))
-  if (icoPath) {
-    const iconFile = Data.IconFile.from(fs.readFileSync(icoPath))
-    // IconFile.icons 元素是 { ...meta, data: IconItem|RawIconItem } 包装，需取 .data
-    const icons = iconFile.icons.map((item) => item.data)
-    // Windows Shell 从主程序图标组 1 取桌面与任务栏图标。部分 Windows
-    // 输出还会带有次级图标组 101；若存在，也要同步替换。
-    for (const groupId of [1, 101]) {
-      const hasGroup = res.entries.some(
-        (entry) => entry.type === 14 && entry.id === groupId && entry.lang === 1033
-      )
-      if (!hasGroup) {
-        if (groupId === 1) {
-          throw new Error('[afterPack] 未找到 Windows 主程序图标组 1，拒绝生成默认图标的安装包')
-        }
-        console.warn(`[afterPack] 未找到安装器图标组 ${groupId}，跳过`)
-        continue
-      }
-      Resource.IconGroupEntry.replaceIconsForResource(res.entries, groupId, 1033, icons)
-      console.log(`[afterPack] 已替换图标组 ${groupId}: ${icoPath}（${icons.length} 个尺寸）`)
-    }
-  } else {
-    console.warn('[afterPack] 未找到 resources/icon.ico，图标保持 Electron 默认')
+  const icoPath = path.join(__dirname, 'resources', 'icon.ico')
+  if (!fs.existsSync(icoPath)) {
+    throw new Error(`[afterPack] 缺少用户提供的图标输入: ${icoPath}`)
+  }
+  const iconFile = Data.IconFile.from(fs.readFileSync(icoPath))
+  // IconFile.icons 元素是 { ...meta, data: IconItem|RawIconItem } 包装，需取 .data
+  const icons = iconFile.icons.map((item) => item.data)
+  // 替换主程序图标组的所有语言版本，避免 Windows Shell 继续显示默认图标。
+  const mainGroups = res.entries.filter((entry) => entry.type === 14 && entry.id === 1)
+  if (!mainGroups.length) {
+    throw new Error('[afterPack] 未找到 Windows 主程序图标组 1，拒绝生成默认图标的安装包')
+  }
+  for (const lang of new Set(mainGroups.map((entry) => entry.lang))) {
+    Resource.IconGroupEntry.replaceIconsForResource(res.entries, 1, lang, icons)
+    console.log(`[afterPack] 已替换主程序图标组 1 (lang=${lang}): ${icoPath}（${icons.length} 个尺寸）`)
+  }
+  const secondaryLanguages = new Set(
+    res.entries.filter((entry) => entry.type === 14 && entry.id === 101).map((entry) => entry.lang)
+  )
+  for (const lang of secondaryLanguages) {
+    Resource.IconGroupEntry.replaceIconsForResource(res.entries, 101, lang, icons)
+    console.log(`[afterPack] 已替换次级图标组 101 (lang=${lang})`)
   }
 
   // 2) 写入版本资源（VS_VERSIONINFO）

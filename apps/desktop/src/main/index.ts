@@ -11,16 +11,21 @@
  * 模型 / 插件 / 工具 / 会话等全部能力来自 dsh（一切皆插件）；
  * API Key 在官方界面 设置 → 模型 中填写并即时生效，持久化在数据目录。
  */
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from 'electron'
-import { mkdirSync } from 'node:fs'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildMenu } from './menu'
-import { checkLayout, dataLayout, runtimeLayout, type DataLayout } from './paths'
+import { checkLayout, runtimeLayout, type DataLayout } from './paths'
 import { registerPreviewIpc } from './preview-fs'
 import { DshRuntime, type RuntimeState } from './runtime'
 import { checkForUpdatesManual, setupUpdater } from './updater'
 import { createViews, type ViewBundle } from './views'
+import {
+  describeMigrationIssue,
+  finalizeLegacyUserData,
+  prepareDesktopStorage,
+  type DesktopStorage
+} from './storage'
 
 // main 以 ESM(.mjs) 输出，没有 __dirname 全局，用 import.meta.url 推导模块目录
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url))
@@ -29,12 +34,16 @@ let win: BrowserWindow | null = null
 let runtime: DshRuntime | null = null
 let views: ViewBundle | null = null
 let data: DataLayout | null = null
+let storage: DesktopStorage | null = null
 let appLoaded = false
+let legacyDataFinalized = false
 
 const singleInstance = app.requestSingleInstanceLock()
 if (!singleInstance) {
   app.quit()
 } else {
+  storage = prepareDesktopStorage()
+
   app.on('second-instance', () => {
     if (!win) return
     if (win.isMinimized()) win.restore()
@@ -54,21 +63,36 @@ if (!singleInstance) {
 
 function bootstrap(): void {
   const layout = runtimeLayout()
-  data = dataLayout()
-  mkdirSync(data.dshHome, { recursive: true })
-  mkdirSync(data.workspace, { recursive: true })
+  const prepared = storage ?? prepareDesktopStorage()
+  storage = prepared
+  data = prepared.data
 
-  runtime = new DshRuntime(layout, data)
+  runtime = new DshRuntime(layout, data, prepared.cacheDir)
 
   // 启动/错误页使用的生命周期 IPC 需在创建窗口（加载启动页）之前注册，
   // 否则页面首帧调用 invoke 会出现 “No handler registered”。
-  ipcMain.handle('shell:get-state', () => runtime?.state ?? null)
+  ipcMain.handle('shell:get-state', () => ({
+    ...(runtime?.state ?? { status: 'error', url: null, port: null, message: '' }),
+    message: startupMessage(prepared) || runtime?.state.message || '',
+    migrationIssues: prepared.migrationIssues.map(issue => ({
+      ...issue,
+      message: describeMigrationIssue(issue)
+    })),
+    initializationError: prepared.initializationError
+  }))
   ipcMain.handle('shell:retry', () => {
-    restartRuntime()
+    app.relaunch()
+    app.exit(0)
     return true
   })
   ipcMain.handle('shell:open-data', () => shell.openPath(data!.dshHome))
   ipcMain.handle('shell:open-workspace', () => shell.openPath(data!.workspace))
+  ipcMain.handle('shell:open-legacy-data', () =>
+    shell.openPath(path.join(prepared.legacyUserData, 'dsh-home'))
+  )
+  ipcMain.handle('shell:open-legacy-workspace', () =>
+    shell.openPath(path.join(prepared.legacyUserData, 'workspace'))
+  )
 
   win = createWindow(data.shellDir)
   views = createViews(win, {
@@ -100,11 +124,29 @@ function bootstrap(): void {
     })
   )
 
-  setupUpdater(() => win)
+  if (!prepared.migrationIssues.length && !prepared.initializationError) {
+    setupUpdater(() => win, prepared.cacheDir)
+  }
 
   runtime.on('state', (state: RuntimeState) => {
     win?.webContents.send('shell:state', state)
-    if (state.status === 'ready' && state.url) loadApp(state.url)
+    if (state.status === 'ready' && state.url) {
+      if (!legacyDataFinalized) {
+        legacyDataFinalized = true
+        const preservedPath = finalizeLegacyUserData(prepared)
+        if (preservedPath) {
+          setTimeout(() => {
+            void dialog.showMessageBox({
+              type: 'warning',
+              title: '旧数据仍保留在原位置',
+              message: 'Witseek 已正常启动，但旧桌面数据未能移动。',
+              detail: `为保护数据，原目录保持不变：\n${preservedPath}`
+            })
+          }, 500)
+        }
+      }
+      loadApp(state.url)
+    }
   })
   runtime.on('log', (text: string) => {
     win?.webContents.send('shell:log', text)
@@ -112,13 +154,25 @@ function bootstrap(): void {
   runtime.on('fatal', () => showError())
   runtime.on('stopped', () => showError())
 
-  const layoutError = checkLayout(layout)
+  const startupError = startupMessage(prepared)
+  const layoutError = startupError || checkLayout(layout)
   if (layoutError) {
     runtime.state = { status: 'error', url: null, port: null, message: layoutError }
     showError()
   } else {
     runtime.start()
   }
+}
+
+function startupMessage(prepared: DesktopStorage): string {
+  const issues = prepared.migrationIssues.map(describeMigrationIssue)
+  const messages = [
+    prepared.initializationError,
+    issues.length
+      ? `检测到旧数据迁移冲突。原数据已保留，请打开相关目录处理后重试：\n${issues.join('\n')}`
+      : null
+  ].filter((message): message is string => Boolean(message))
+  return messages.join('\n')
 }
 
 function restartRuntime(): void {

@@ -12,6 +12,8 @@
     retry: () => ipcRenderer.invoke('shell:retry'),
     openDataFolder: () => ipcRenderer.invoke('shell:open-data'),
     openWorkspace: () => ipcRenderer.invoke('shell:open-workspace'),
+    openLegacyDataFolder: () => ipcRenderer.invoke('shell:open-legacy-data'),
+    openLegacyWorkspace: () => ipcRenderer.invoke('shell:open-legacy-workspace'),
     onState: (cb: (state: unknown) => void) => {
       const handler = (_event: unknown, state: unknown) => cb(state)
       ipcRenderer.on('shell:state', handler)

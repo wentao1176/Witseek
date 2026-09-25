@@ -34,7 +34,8 @@ export class DshRuntime extends EventEmitter {
 
   constructor(
     private readonly layout: RuntimeLayout,
-    private readonly data: DataLayout
+    private readonly data: DataLayout,
+    private readonly cacheDir: string
   ) {
     super()
   }
@@ -65,7 +66,9 @@ export class DshRuntime extends EventEmitter {
     const env = {
       ...process.env,
       DSH_HOME: this.data.dshHome,
-      WITSEEK_AGENT_PRESET_ROOT: this.layout.agentPresetRoot
+      WITSEEK_AGENT_PRESET_ROOT: this.layout.agentPresetRoot,
+      TEMP: this.cacheDir,
+      TMP: this.cacheDir
     }
 
     this.setState({ status: 'starting', url: null, port: null, message: '正在启动 DeepSeek Harness 运行时…' })

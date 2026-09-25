@@ -64,10 +64,12 @@
           <button class="primary" id="retry">重试启动</button>
           <button id="openData">打开数据目录</button>
           <button id="openWorkspace">打开工作区</button>
+          <button id="openLegacyData" hidden>打开旧 dsh 数据目录</button>
+          <button id="openLegacyWorkspace" hidden>打开旧工作区</button>
         </div>
         <div class="foot">
-          数据目录保存配置、API Key（.credentials.yaml）与已安装插件，可在备份后删除其中的
-          dsh-home 以重置配置。若反复失败，请确认安装完整后重试。
+          数据目录保存 dsh 配置、API Key 与插件。迁移遇到冲突时，旧目录会保留；处理目录后点击重试。
+          成功启动后，旧桌面剩余文件会移入数据目录下的备份文件夹。
         </div>
       </div>
     </div>
@@ -89,6 +91,10 @@
         try {
           const s = await api.getState()
           if (s && s.message) msgEl.textContent = s.message
+          if (s && Array.isArray(s.migrationIssues) && s.migrationIssues.length) {
+            document.getElementById('openLegacyData').hidden = false
+            document.getElementById('openLegacyWorkspace').hidden = false
+          }
         } catch (_) {}
       }
       document.getElementById('retry').addEventListener('click', (e) => {
@@ -97,6 +103,8 @@
       })
       document.getElementById('openData').addEventListener('click', () => api && api.openDataFolder())
       document.getElementById('openWorkspace').addEventListener('click', () => api && api.openWorkspace())
+      document.getElementById('openLegacyData').addEventListener('click', () => api && api.openLegacyDataFolder())
+      document.getElementById('openLegacyWorkspace').addEventListener('click', () => api && api.openLegacyWorkspace())
       init()
     </script>
   </body>

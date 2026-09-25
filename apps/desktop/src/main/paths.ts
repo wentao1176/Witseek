@@ -82,7 +82,14 @@ export function runtimeLayout(): RuntimeLayout {
   }
 }
 
-export function dataLayout(): DataLayout {
+export interface DataLayoutOverrides {
+  /** Witseek-owned dsh home. */
+  dshHome?: string
+  /** Default workspace before the WITSEEK_WORKSPACE override is applied. */
+  defaultWorkspace?: string
+}
+
+export function dataLayout(overrides: DataLayoutOverrides = {}): DataLayout {
   const userData = app.getPath('userData')
   const shellDir = app.isPackaged
     ? path.join(process.resourcesPath, 'shell')
@@ -95,10 +102,14 @@ export function dataLayout(): DataLayout {
     : path.join(outDir(), 'renderer', 'preview.html')
 
   return {
-    dshHome: path.join(userData, 'dsh-home'),
-    // 默认工作区在 userData 下；可用环境变量 WITSEEK_WORKSPACE 覆盖（开发/高级用法），
+    dshHome: overrides.dshHome ?? path.join(userData, 'dsh-home'),
+    // Windows 默认工作区位于 Witseek dsh home；其他平台保持原位置。
+    // 可用 WITSEEK_WORKSPACE 覆盖（开发/高级用法），
     // 它同时是 dsh 进程 cwd 与右侧文件预览栏的根目录。
-    workspace: process.env.WITSEEK_WORKSPACE || path.join(userData, 'workspace'),
+    workspace:
+      process.env.WITSEEK_WORKSPACE ||
+      overrides.defaultWorkspace ||
+      path.join(userData, 'workspace'),
     shellDir,
     previewPreload: path.join(outDir(), 'preload', 'preview.cjs'),
     rendererEntry,

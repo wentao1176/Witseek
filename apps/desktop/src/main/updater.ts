@@ -14,7 +14,8 @@ import {
   type BrowserWindow,
   type MessageBoxOptions
 } from 'electron'
-import { autoUpdater } from 'electron-updater'
+import { NsisUpdater } from 'electron-updater'
+import path from 'node:path'
 
 const GITHUB_FEED = {
   provider: 'github' as const,
@@ -23,6 +24,7 @@ const GITHUB_FEED = {
 }
 
 let configured = false
+let updater: NsisUpdater | null = null
 
 type WinGetter = () => BrowserWindow | null
 
@@ -44,16 +46,31 @@ function compareVersions(a: string, b: string): number {
   return 0
 }
 
-export function setupUpdater(getWin: WinGetter): void {
+export function setupUpdater(getWin: WinGetter, cacheDir: string): void {
   if (!app.isPackaged || configured) return
   configured = true
 
-  autoUpdater.setFeedURL(GITHUB_FEED)
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.allowDowngrade = false
+  updater = new NsisUpdater(GITHUB_FEED, {
+    get version() { return app.getVersion() },
+    get name() { return app.getName() },
+    get isPackaged() { return app.isPackaged },
+    get appUpdateConfigPath() {
+      return app.isPackaged
+        ? path.join(process.resourcesPath, 'app-update.yml')
+        : path.join(app.getAppPath(), 'dev-app-update.yml')
+    },
+    get userDataPath() { return app.getPath('userData') },
+    get baseCachePath() { return cacheDir },
+    whenReady: () => app.whenReady(),
+    relaunch: () => app.relaunch(),
+    quit: () => app.quit(),
+    onQuit: handler => app.once('quit', (_event, exitCode) => handler(exitCode))
+  })
+  updater.autoDownload = true
+  updater.autoInstallOnAppQuit = true
+  updater.allowDowngrade = false
 
-  autoUpdater.on('update-downloaded', info => {
+  updater.on('update-downloaded', info => {
     void box(getWin, {
       type: 'info',
       title: '更新已就绪',
@@ -63,16 +80,16 @@ export function setupUpdater(getWin: WinGetter): void {
       defaultId: 0,
       cancelId: 1
     }).then(res => {
-      if (res.response === 0) autoUpdater.quitAndInstall()
+      if (res.response === 0) updater?.quitAndInstall()
     })
   })
 
-  autoUpdater.on('error', err => {
+  updater.on('error', err => {
     console.error('[updater] 更新检查失败：', err?.message ?? err)
   })
 
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(err => {
+    updater?.checkForUpdates().catch(err => {
       console.error('[updater] 启动检查失败：', err?.message ?? err)
     })
   }, 6000)
@@ -90,8 +107,19 @@ export async function checkForUpdatesManual(getWin: WinGetter): Promise<void> {
     return
   }
 
+  if (!updater) {
+    await box(getWin, {
+      type: 'warning',
+      title: '检查更新',
+      message: '更新器尚未就绪',
+      detail: '请先解决启动页面显示的数据目录问题，再重试。',
+      buttons: ['知道了']
+    })
+    return
+  }
+
   try {
-    const result = await autoUpdater.checkForUpdates()
+    const result = await updater.checkForUpdates()
     const latest = result?.updateInfo?.version
     if (!latest) {
       await box(getWin, {

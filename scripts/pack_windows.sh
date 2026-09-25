@@ -54,11 +54,13 @@ echo "== 3/8 编译壳主进程 / preload / 预览栏 renderer =="
 echo "== 4/8 准备内置 node.exe + 裁剪 dsh 树（.runtime-build/win） =="
 (cd apps/desktop && node scripts/prepare-runtime-win.mjs)
 
-echo "== 5/8 准备图标（大圆角） =="
-mkdir -p apps/desktop/resources
-[ -f assets/icons/icon.ico ] && cp -f assets/icons/icon.ico apps/desktop/resources/icon.ico
-[ -f assets/icons/icon.png ] && cp -f assets/icons/icon.png apps/desktop/resources/icon.png
-test -f apps/desktop/resources/icon.ico || { echo "缺少 apps/desktop/resources/icon.ico"; exit 1; }
+echo "== 5/8 从用户提供的鲸鱼图重新生成图标（大圆角） =="
+python3 scripts/make_icons.py \
+  --src assets/source/Witseek.jpg \
+  --out assets/icons \
+  --app-resources apps/desktop/resources
+test -f apps/desktop/resources/icon.ico || { echo "图标生成失败：缺少 apps/desktop/resources/icon.ico"; exit 1; }
+test -f apps/desktop/resources/icon.png || { echo "图标生成失败：缺少 apps/desktop/resources/icon.png"; exit 1; }
 
 echo "== 6/8 electron-builder 产出 win-unpacked（dir，免 Wine；resedit 改 PE 资源） =="
 rm -rf artifacts/win-unpacked

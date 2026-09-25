@@ -31,9 +31,19 @@ BrowserWindow
   - `runtime.ts` 子进程状态机与就绪 URL 解析；`views.ts` 双视图布局；
     `preview-fs.ts` 工作区只读浏览（含路径越权防护）；`updater.ts` 自动更新。
 - 预览栏渲染层：`apps/desktop/src/renderer`（marked + highlight.js 在构建时打包，离线可用）。
-- 数据目录（菜单“应用 → 打开数据目录”）：
-  - `dsh-home/`：dsh 配置、凭据（API Key）、插件、profile；
-  - `workspace/`：dsh 的默认工作目录，也是文件预览栏的根（可用环境变量 `WITSEEK_WORKSPACE` 覆盖）。
+- 数据目录（菜单“应用 → 打开数据目录”）：Witseek 的 dsh 配置、凭据（API Key）、插件与 profile 位于 `%USERPROFILE%\.dsh\witseek`；默认工作区位于其 `workspace` 子目录，可用环境变量 `WITSEEK_WORKSPACE` 指定其他工作区。
+
+## Windows 数据与安装位置
+
+- Witseek 的 dsh 配置和凭据：`%USERPROFILE%\.dsh\witseek`
+- Electron 壳设置：`%USERPROFILE%\.dsh\witseek\electron`
+- 默认工作区：`%USERPROFILE%\.dsh\witseek\workspace`
+- 默认安装目录：`%USERPROFILE%\.dsh\WitseekApp`；安装时仍可选择其他当前用户可写的位置。
+- 浏览器会话、临时文件和更新下载缓存：所选安装目录旁的 `<安装目录名>-cache` 文件夹。
+
+首次升级时，旧版本的 dsh 配置和默认工作区只会在目标目录为空且可以同盘移动时迁移。遇到冲突时，启动页会显示相关路径；解决后可重试。应用成功启动后，旧桌面数据中剩余的文件会移入 `legacy-desktop-backup-*` 备份目录。卸载会移除程序与旁边的缓存目录，保留 Witseek 的 dsh 数据和工作区。
+
+安装包目前未使用 Authenticode 证书签名。Windows SmartScreen 可能显示保护提示；这不会触发管理员权限请求。需要签名分发时，需另行配置可信代码签名证书。
 
 ## 目录结构
 
@@ -79,18 +89,18 @@ pnpm --filter @witseek/desktop dev
    `apps/desktop/package.json` 的 `build.publish` 中修改 owner/repo）。
 2. 推送代码（见下）。
 3. 打包后把 `Witseek-Setup-<version>.exe` 与 `latest.yml` 一并上传到同一个
-   **Release**（需为最新 release，tag 如 `v0.3.0`）。客户端经
+   **Release**（需为最新 release，tag 如 `v0.4.3`）。客户端经
    `…/releases/latest/download/latest.yml` 发现更新，校验 sha512 后全量下载安装。
 
 ```bash
 # 需要有 repo 权限的 PAT：export GH_TOKEN=ghp_xxx
-python3 scripts/github_release.py v0.3.0 --notes docs/release-v0.3.0.md
+python3 scripts/github_release.py v0.4.3 --notes docs/release-v0.4.3.md
 ```
 
 ## 配置 API Key
 
 首次启动按引导填写；或进入 **设置 → 模型**，在 DeepSeek 提供方卡片中填入 API 密钥并保存。
-凭据保存在数据目录的 `dsh-home/.credentials.yaml`。
+凭据保存在 `%USERPROFILE%\.dsh\witseek\.credentials.yaml`。
 
 ## 致谢与许可
 
