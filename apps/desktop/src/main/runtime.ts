@@ -1,7 +1,8 @@
 /**
  * 内置 dsh 运行时的子进程管理。
  *
- * 以独立的上游 Node 启动 `dsh web --no-open --port 0`：
+ * 以独立的上游 Node 启动 `dsh web --patch <file> --no-open --port 0`：
+ *  - dsh 的启动器参数必须放在首个 Web 参数之前，否则会被转发给 Web 应用；
  *  - --port 0 让操作系统分配空闲端口，避免与其它实例冲突；
  *  - dsh 启动后会在 stdout 打印带随机 token 的访问地址
  *    （形如 `dsh web: http://127.0.0.1:3080/?token=...`），解析它交给窗口加载；
@@ -53,13 +54,13 @@ export class DshRuntime extends EventEmitter {
     const args = [
       this.layout.dshBin,
       'web',
+      '--patch',
+      this.layout.witseekPatchPath,
       '--no-open',
       '--host',
       '127.0.0.1',
       '--port',
-      '0',
-      '--patch',
-      this.layout.witseekPatchPath
+      '0'
     ]
     const env = {
       ...process.env,
