@@ -81,11 +81,11 @@
 **Interfaces:**
 - The installer default becomes `$PROFILE\.dsh\WitseekApp`.
 - `.onInit` reads the previous HKCU install path: redirect the exact old default `$LOCALAPPDATA\Programs\Witseek` to the new default; keep any other recorded custom path.
-- The installer and application derive the same sibling cache path. Uninstall removes that cache and `$INSTDIR`, but never removes `%USERPROFILE%\.dsh\witseek`.
+- The installer and application derive the same sibling cache path. Reject installation and uninstall paths that equal, contain, or sit inside the registered dsh home or workspace. Uninstall removes a cache only when its recorded path matches the current derived sibling and its ownership flag is set; it removes the program directory only after the overlap guard passes.
 
 - [ ] Remove the old unconditional `InstallDirRegKey` behavior and add deterministic `.onInit` handling for the old default versus custom path.
 - [ ] Preserve `RequestExecutionLevel user`, HKCU-only registration, the editable directory page, and the Witseek icon on shortcuts.
-- [ ] Record the derived cache path for uninstall and remove only that cache plus the program directory; do not remove the dsh home or default workspace.
+- [ ] Record the derived cache path and ownership for uninstall; delete it only when both still match the current install. Store the resolved dsh home and workspace paths, and reject installation/uninstall paths that overlap either protected data path.
 - [ ] Build the NSIS output in Task 4. Expected: `makensis` exits 0 and the script contains the `.dsh\WitseekApp` default and per-user execution level.
 
 ### Task 4: Refresh the supplied icon, version, docs, and Windows package
@@ -103,7 +103,7 @@
 - [ ] Update README data/install paths and document the unsigned-installer SmartScreen limitation.
 - [ ] Write concise Chinese release notes for v0.4.3 covering storage migration, install/cache locations, icon, preview/preset retention, and automatic updates.
 - [ ] Run `pnpm --filter @witseek/desktop typecheck` and `bash scripts/pack_windows.sh` from the repository root. Expected: both commands exit 0; packaging produces the version-matched x64 setup and `latest.yml`.
-- [ ] Inspect `file artifacts/Witseek-Setup-0.4.3.exe`, the setup size and digest, generated icon replacement output, and `latest.yml` version, filename, size, and SHA-512 values. Expected: PE32+ x86-64 setup; manifest values match the generated file exactly.
+- [ ] Inspect `file artifacts/Witseek-Setup-0.4.3.exe`, the setup size and digest, generated icon replacement output, and `latest.yml` version, filename, size, and SHA-512 values. Expected: the NSIS bootstrap is a PE32 installer and the bundled Witseek application is PE32+ x86-64; manifest values match the generated file exactly.
 
 ### Task 5: Commit, push, and publish v0.4.3
 
@@ -113,5 +113,5 @@
 
 - [ ] Confirm the Git author is `wentao1176` and review the complete diff and generated manifest before publishing.
 - [ ] Push the verified `main` commits to `origin`.
-- [ ] Run `python3 scripts/github_release.py v0.4.3 --notes docs/release-v0.4.3.md`. Expected: release URL points to `github.com/wentao1176/Witseek/releases/tag/v0.4.3` and contains the matching setup and `latest.yml` assets.
+- [ ] Publish tag `v0.4.3` from the authenticated GitHub UI because the build host has no GitHub CLI token; attach the setup and `latest.yml` built from the same commit, using `docs/release-v0.4.3.md` as the release notes.
 - [ ] Confirm the remote release assets are present and report the installer link, version, size, and unsigned status.

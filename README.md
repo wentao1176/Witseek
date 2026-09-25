@@ -38,10 +38,10 @@ BrowserWindow
 - Witseek 的 dsh 配置和凭据：`%USERPROFILE%\.dsh\witseek`
 - Electron 壳设置：`%USERPROFILE%\.dsh\witseek\electron`
 - 默认工作区：`%USERPROFILE%\.dsh\witseek\workspace`
-- 默认安装目录：`%USERPROFILE%\.dsh\WitseekApp`；安装时仍可选择其他当前用户可写的位置。
+- 默认安装目录：`%USERPROFILE%\.dsh\WitseekApp`；安装时仍可选择其他当前用户可写的位置，安装器与卸载器会阻止程序目录覆盖 dsh 配置或工作区。
 - 浏览器会话、临时文件和更新下载缓存：所选安装目录旁的 `<安装目录名>-cache` 文件夹。
 
-首次升级时，旧版本的 dsh 配置和默认工作区只会在目标目录为空且可以同盘移动时迁移；旧的默认程序目录会在新版本安装成功后清理。遇到数据冲突时，启动页会显示相关路径；解决后可重试。应用成功启动后，旧桌面数据中剩余的文件会移入 `legacy-desktop-backup-*` 备份目录。卸载会移除程序和由本次安装创建并记录归属的旁置缓存，保留预先存在的缓存目录、Witseek dsh 数据和工作区。
+首次升级时，旧版本的 dsh 配置和默认工作区只会在目标目录为空且可以同盘移动时迁移；旧的默认程序目录会在新版本安装成功后清理。遇到数据冲突时，启动页会显示相关路径；解决后可重试。应用成功启动后，旧桌面数据中剩余的文件会移入 `legacy-desktop-backup-*` 备份目录。安装和卸载会阻止程序目录与 Witseek dsh 数据或工作区重叠；卸载只会移除路径与当前安装位置吻合且由本次安装创建的旁置缓存。
 
 安装包目前未使用 Authenticode 证书签名。Windows SmartScreen 可能显示保护提示；这不会触发管理员权限请求。需要签名分发时，需另行配置可信代码签名证书。
 
