@@ -52,3 +52,7 @@ Thumbs.db
 # ---------- 本地便签 / 杂项（不入库） ----------
 /warning.md
 /Witseek.jpg
+
+# ---------- Codex worktrees / plan workspace ----------
+/.worktrees/
+/.superpowers/
