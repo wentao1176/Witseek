@@ -1,0 +1,4 @@
+provider: github
+owner: wentao1176
+repo: Witseek
+updaterCacheDirName: Witseek-updater

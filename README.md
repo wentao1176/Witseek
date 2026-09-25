@@ -89,12 +89,12 @@ pnpm --filter @witseek/desktop dev
    `apps/desktop/package.json` 的 `build.publish` 中修改 owner/repo）。
 2. 推送代码（见下）。
 3. 打包后把 `Witseek-Setup-<version>.exe` 与 `latest.yml` 一并上传到同一个
-   **Release**（需为最新 release，tag 如 `v0.4.3`）。客户端经
+   **Release**（需为最新 release，tag 如 `v0.4.4`）。客户端经
    `…/releases/latest/download/latest.yml` 发现更新，校验 sha512 后全量下载安装。
 
 ```bash
 # 需要有 repo 权限的 PAT：export GH_TOKEN=ghp_xxx
-python3 scripts/github_release.py v0.4.3 --notes docs/release-v0.4.3.md
+python3 scripts/github_release.py v0.4.4 --notes docs/release-v0.4.4.md
 ```
 
 ## 配置 API Key

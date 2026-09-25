@@ -31,6 +31,8 @@ export class DshRuntime extends EventEmitter {
   private buffer = ''
   private ready = false
   private timer: NodeJS.Timeout | null = null
+  private restartTimer: NodeJS.Timeout | null = null
+  private generation = 0
 
   constructor(
     private readonly layout: RuntimeLayout,
@@ -47,9 +49,14 @@ export class DshRuntime extends EventEmitter {
 
   start(): void {
     if (this.child) return
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
     mkdirSync(this.data.dshHome, { recursive: true })
     mkdirSync(this.data.workspace, { recursive: true })
 
+    const generation = ++this.generation
     this.ready = false
     this.buffer = ''
     const args = [
@@ -80,8 +87,10 @@ export class DshRuntime extends EventEmitter {
       detached: process.platform !== 'win32'
     })
     this.child = child
+    const isCurrent = (): boolean => this.child === child && this.generation === generation
 
     const onData = (chunk: Buffer): void => {
+      if (!isCurrent()) return
       const text = chunk.toString()
       this.buffer += text
       if (this.buffer.length > 200_000) this.buffer = this.buffer.slice(-200_000)
@@ -107,11 +116,19 @@ export class DshRuntime extends EventEmitter {
     child.stderr?.on('data', onData)
 
     child.on('error', err => {
+      if (!isCurrent()) return
+      this.child = null
+      this.generation += 1
+      if (this.timer) {
+        clearTimeout(this.timer)
+        this.timer = null
+      }
       this.setState({ status: 'error', message: `无法启动运行时：${err.message}` })
       this.emit('fatal', err.message)
     })
 
     child.on('exit', (code, signal) => {
+      if (!isCurrent()) return
       this.child = null
       if (this.timer) {
         clearTimeout(this.timer)
@@ -128,6 +145,8 @@ export class DshRuntime extends EventEmitter {
     })
 
     this.timer = setTimeout(() => {
+      this.timer = null
+      if (!isCurrent()) return
       if (!this.ready) {
         const message = '启动超时：等待 dsh 服务地址超时。'
         this.setState({ status: 'error', message })
@@ -139,8 +158,17 @@ export class DshRuntime extends EventEmitter {
 
   kill(): void {
     const child = this.child
+    this.child = null
+    this.generation += 1
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
     if (!child || !child.pid) {
-      this.child = null
       return
     }
     try {
@@ -156,12 +184,14 @@ export class DshRuntime extends EventEmitter {
     } catch {
       /* ignore */
     }
-    this.child = null
   }
 
   restart(): void {
     this.kill()
-    setTimeout(() => this.start(), 700)
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      this.start()
+    }, 700)
   }
 
   recentLog(): string {

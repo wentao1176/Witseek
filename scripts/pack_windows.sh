@@ -38,6 +38,10 @@ SETUP="$ROOT/artifacts/Witseek-Setup-${VERSION}.exe"
 NSI="$ROOT/artifacts/witseek.nsi"
 YML="$ROOT/artifacts/latest.yml"
 
+# A failed build must never leave a previous latest.yml beside a missing or
+# different-version installer. Rebuild both files as one release pair.
+rm -f "$SETUP" "$YML"
+
 echo "== 1/8 准备 win32-x64 dsh 生产树（hoisted，幂等） =="
 if [ ! -f runtime/stage-win32/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js ]; then
   bash scripts/stage_win_runtime.sh
@@ -65,6 +69,11 @@ test -f apps/desktop/resources/icon.png || { echo "图标生成失败：缺少 a
 echo "== 6/8 electron-builder 产出 win-unpacked（dir，免 Wine；resedit 改 PE 资源） =="
 rm -rf artifacts/win-unpacked
 (cd apps/desktop && pnpm exec electron-builder --win dir)
+UPDATE_CONFIG="artifacts/win-unpacked/resources/app-update.yml"
+test -s "$UPDATE_CONFIG" || { echo "electron-updater 配置缺失：$UPDATE_CONFIG"; exit 1; }
+grep -qx "provider: github" "$UPDATE_CONFIG" || { echo "electron-updater provider 配置错误"; exit 1; }
+grep -qx "owner: wentao1176" "$UPDATE_CONFIG" || { echo "electron-updater owner 配置错误"; exit 1; }
+grep -qx "repo: Witseek" "$UPDATE_CONFIG" || { echo "electron-updater repo 配置错误"; exit 1; }
 
 echo "== 7/8 生成并编译 NSIS 安装程序（lzma solid） =="
 python3 scripts/make_nsis.py \
@@ -78,6 +87,8 @@ makensis -V2 "$NSI"
 
 echo "== 8/8 生成 electron-updater 更新清单 latest.yml =="
 python3 scripts/make_update_manifest.py --setup "$SETUP" --version "$VERSION" --out "$YML"
+grep -qx "version: $VERSION" "$YML" || { echo "latest.yml 版本与安装包不一致"; exit 1; }
+grep -qx "path: Witseek-Setup-${VERSION}.exe" "$YML" || { echo "latest.yml 文件名与安装包不一致"; exit 1; }
 echo "----- latest.yml -----"
 cat "$YML"
 

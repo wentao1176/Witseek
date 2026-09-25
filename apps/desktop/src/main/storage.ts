@@ -173,13 +173,15 @@ export function prepareDesktopStorage(): DesktopStorage {
   const hasMigrationIssues = migrationIssues.length > 0
   const shellUserData = path.join(dshHome, 'electron')
   try {
-    mkdirSync(cacheDir, { recursive: true })
+    // Even recovery windows must stay under .dsh. Set this before any operation
+    // that can fail so Electron never falls back to the legacy Roaming path.
+    app.setPath('userData', shellUserData)
     app.setPath('sessionData', cacheDir)
+    mkdirSync(cacheDir, { recursive: true })
     if (!hasMigrationIssues) {
       mkdirSync(dshHome, { recursive: true })
       mkdirSync(process.env.WITSEEK_WORKSPACE || defaultWorkspace, { recursive: true })
       mkdirSync(shellUserData, { recursive: true })
-      app.setPath('userData', shellUserData)
     }
   } catch (error) {
     initializationError = `无法准备 Witseek 数据或缓存目录：${error instanceof Error ? error.message : String(error)}`

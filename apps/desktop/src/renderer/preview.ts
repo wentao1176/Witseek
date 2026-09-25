@@ -282,6 +282,7 @@ async function toggleDir(rel: string): Promise<void> {
     node.open = !node.open
     renderTree()
   } catch (err) {
+    if (epoch !== workspaceEpoch) return
     treeEl.textContent = `读取目录失败：${err instanceof Error ? err.message : String(err)}`
   }
 }
@@ -310,12 +311,15 @@ async function initTree(): Promise<void> {
 }
 
 async function openFile(rel: string): Promise<void> {
+  const epoch = workspaceEpoch
   try {
     const result = await api.read(rel)
+    if (epoch !== workspaceEpoch) return
     fileCurrent = result
     renderResult(result)
     renderTree()
   } catch (err) {
+    if (epoch !== workspaceEpoch) return
     showError(err instanceof Error ? err.message : String(err))
   }
 }
