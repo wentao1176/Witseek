@@ -1,7 +1,7 @@
 # Witseek Windows Storage and Install Path Design
 
 - **Date:** 2026-09-25
-- **Status:** Draft for user review
+- **Status:** Updated per uninstall-path follow-up; implementation plan pending review
 - **Target:** Next Windows release after v0.4.2
 - **Repository:** `git@github.com:wentao1176/Witseek.git`
 
@@ -63,7 +63,9 @@ Uninstall removes the application directory and its install-side cache directory
 
 Before creating or overriding Electron paths, inspect the old Electron `userData` path `%APPDATA%\@witseek\desktop`. Its `dsh-home` contains symbolic links, so recursively copying it can fail or require extra Windows privileges. If the old `dsh-home` exists, `%USERPROFILE%\.dsh\witseek` does not exist, and source and destination are on the same volume, atomically rename the old directory to the new location. This preserves links and contents without merging. Never move it into the ordinary `%USERPROFILE%\.dsh` root, merge credentials, or print credential contents to logs. If the old source is absent, use the existing new home or create it normally.
 
-Apply the same same-volume rename rule to the old default workspace `%APPDATA%\@witseek\desktop\workspace`, moving it to `%USERPROFILE%\.dsh\witseek\workspace` only when that destination is absent. If either migration has conflicting source and destination paths, crosses volumes, or fails, do not copy, overwrite, or delete either tree. Show the affected paths in the recovery page with actions to open them and retry after the user resolves the conflict. Do not create the new dsh home or workspace before these decisions. Keep migrated data intact until the runtime reports ready; on startup failure, leave it in place and show the recovery page. After a successful start, clear only disposable legacy Electron browser caches and the stale updater installer cache. Preserve any legacy workspace or `dsh-home` that could not be moved so user files remain recoverable.
+Apply the same same-volume rename rule to the old default workspace `%APPDATA%\@witseek\desktop\workspace`, moving it to `%USERPROFILE%\.dsh\witseek\workspace` only when that destination is absent. If either migration has conflicting source and destination paths, crosses volumes, or fails, do not copy, overwrite, or delete either tree. Show the affected paths in the recovery page with actions to open them and retry after the user resolves the conflict. Do not create the new dsh home or workspace before these decisions. Keep migrated data intact until the runtime reports ready; on startup failure, leave it in place and show the recovery page.
+
+After dsh reports ready, atomically rename the remaining old Electron `userData` directory to a unique `legacy-desktop-backup-<timestamp>` directory under `%USERPROFILE%\.dsh\witseek`. This moves leftover settings and caches inside `.dsh` without deleting them. If the backup rename fails, leave the old directory untouched and report its path. Remove `%APPDATA%\@witseek` only with a non-recursive empty-directory removal; leave it if another product or file still exists there. After successful startup, also remove only the stale updater installer cache at `%LOCALAPPDATA%\dsh-desktop-updater`; the active updater cache follows the selected install location.
 
 If the user selected a custom workspace through `WITSEEK_WORKSPACE`, continue using it and do not migrate or delete it. If the old default workspace does not exist, create `%USERPROFILE%\.dsh\witseek\workspace` on first launch.
 
@@ -79,6 +81,7 @@ The current installer is unsigned. This design keeps installation unprivileged b
 
 - First launch uses `%USERPROFILE%\.dsh\witseek` for Witseek dsh data and does not change the ordinary `%USERPROFILE%\.dsh` home.
 - Eligible old Witseek `dsh-home` and default workspace data move as same-volume renames; conflicts, cross-volume locations, and failures leave both copies untouched and expose a recovery path. Credential contents never appear in logs.
+- After a successful start, remaining legacy Electron data moves under `.dsh\witseek\legacy-desktop-backup-*`; `%APPDATA%\@witseek` is removed only when empty. A failed backup move preserves and reports the old path.
 - Electron preferences remain under `.dsh`; browser and updater caches follow the chosen installation location.
 - Upgrade from the previous default install path selects the new `.dsh\WitseekApp` default; a user-selected custom install path remains selected.
 - A path without current-user write access produces a clear error and never triggers UAC.
