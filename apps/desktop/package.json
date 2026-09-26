@@ -1,6 +1,6 @@
 {
   "name": "@witseek/desktop",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "description": "Witseek desktop — Electron shell that packages the official DeepSeek Harness (dsh) Web runtime, with a workspace file-preview sidebar and GitHub auto-update",
   "main": "./out/main/index.mjs",

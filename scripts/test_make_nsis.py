@@ -28,7 +28,7 @@ class MakeNsisTests(unittest.TestCase):
                     "--ico", str(icon),
                     "--nsi", str(nsi),
                     "--setup", str(root / "setup.exe"),
-                    "--version", "0.4.4",
+                    "--version", "0.4.5",
                 ],
                 check=True,
                 capture_output=True,
@@ -61,6 +61,16 @@ class MakeNsisTests(unittest.TestCase):
 
             self.assertIn("Function CheckPayloadReparse", generated)
             self.assertIn("Function un.CheckPayloadReparse", generated)
+            self.assertIn('GetFullPathName $NormalizedPath "$PathToNormalize\\"', generated)
+            self.assertEqual(generated.count("GetFullPathName"), 2)
+            self.assertIn("Function NormalizeDirectoryPath", generated)
+            self.assertIn("Function un.NormalizeDirectoryPath", generated)
+            self.assertIn('StrCmp $PathNormalizeFailed "0" 0 install_path_invalid', generated)
+            self.assertIn('StrCmp $PathNormalizeFailed "0" 0 uninstall_path_invalid', generated)
+            self.assertLess(
+                generated.index('StrCpy $INSTDIR "$NormalizedInstallDir"'),
+                generated.index('  Call ComputeInstallCacheDir', generated.index("Function ValidateInstallDir")),
+            )
             self.assertIn(
                 'StrCpy $PathCandidate "$CleanupDir\\resources\\runtime\\nested"',
                 generated,
