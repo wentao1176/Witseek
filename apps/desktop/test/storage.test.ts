@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -67,5 +67,49 @@ describe('prepareDesktopStorage', () => {
 
     expect(storage.initializationError).toMatch(/无法准备/)
     expect(appMock.setPath).toHaveBeenCalledWith('userData', path.join(dshHome, 'electron'))
+  })
+
+  it('rejects a packaged workspace under the install directory before creating it', () => {
+    const installDir = path.join(tempRoot, 'Install', 'WitseekApp')
+    const unsafeWorkspace = path.join(installDir, 'workspace')
+    mkdirSync(installDir, { recursive: true })
+    configureWindowsApp(tempRoot)
+    appMock.isPackaged = true
+    vi.stubGlobal('process', {
+      ...process,
+      platform: 'win32',
+      execPath: path.join(installDir, 'Witseek.exe'),
+      resourcesPath: path.join(tempRoot, 'resources'),
+      env: { ...process.env, WITSEEK_WORKSPACE: unsafeWorkspace }
+    })
+
+    const storage = prepareDesktopStorage()
+
+    expect(storage.initializationError).toMatch(/工作区不能与 Witseek 安装目录或更新缓存重叠/)
+    expect(storage.data.workspace).toBe(path.join(tempRoot, '.dsh', 'witseek', 'workspace'))
+    expect(existsSync(unsafeWorkspace)).toBe(false)
+  })
+
+  it('rejects a packaged workspace under the updater cache before creating it', () => {
+    const installDir = path.join(tempRoot, 'Install', 'WitseekApp')
+    const cacheDir = path.join(tempRoot, 'Install', 'WitseekApp-cache')
+    const unsafeWorkspace = path.join(cacheDir, 'workspace')
+    mkdirSync(installDir, { recursive: true })
+    mkdirSync(cacheDir, { recursive: true })
+    configureWindowsApp(tempRoot)
+    appMock.isPackaged = true
+    vi.stubGlobal('process', {
+      ...process,
+      platform: 'win32',
+      execPath: path.join(installDir, 'Witseek.exe'),
+      resourcesPath: path.join(tempRoot, 'resources'),
+      env: { ...process.env, WITSEEK_WORKSPACE: unsafeWorkspace }
+    })
+
+    const storage = prepareDesktopStorage()
+
+    expect(storage.initializationError).toMatch(/工作区不能与 Witseek 安装目录或更新缓存重叠/)
+    expect(storage.data.workspace).toBe(path.join(tempRoot, '.dsh', 'witseek', 'workspace'))
+    expect(existsSync(unsafeWorkspace)).toBe(false)
   })
 })

@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import path from 'node:path'
 import { dataLayout, type DataLayout } from './paths'
+import { pathsOverlap } from './path-safety'
 
 export type DataMigrationReason =
   | 'destination-exists'
@@ -104,7 +105,23 @@ export function prepareDesktopStorage(): DesktopStorage {
 
   const legacyDshHome = path.join(legacyUserData, 'dsh-home')
   const legacyWorkspace = path.join(legacyUserData, 'workspace')
-  const useCustomWorkspace = Boolean(process.env.WITSEEK_WORKSPACE)
+  const requestedWorkspace = process.env.WITSEEK_WORKSPACE || ''
+  let activeWorkspace = requestedWorkspace || defaultWorkspace
+  let workspaceIsSafe = true
+  if (app.isPackaged) {
+    try {
+      const protectedDirs = [path.dirname(process.execPath), cacheDir]
+      if (protectedDirs.some(directory => pathsOverlap(directory, activeWorkspace))) {
+        workspaceIsSafe = false
+        initializationError = '工作区不能与 Witseek 安装目录或更新缓存重叠。请清除 WITSEEK_WORKSPACE 或改用这两个目录之外的文件夹。'
+      }
+    } catch (error) {
+      workspaceIsSafe = false
+      initializationError = `无法确认工作区路径安全：${error instanceof Error ? error.message : String(error)}`
+    }
+    if (!workspaceIsSafe) activeWorkspace = defaultWorkspace
+  }
+  const useCustomWorkspace = Boolean(requestedWorkspace && workspaceIsSafe)
 
   // Preflight both moves before changing either tree. A collision or volume
   // mismatch therefore leaves the old profile and workspace untouched.
@@ -180,7 +197,7 @@ export function prepareDesktopStorage(): DesktopStorage {
     mkdirSync(cacheDir, { recursive: true })
     if (!hasMigrationIssues) {
       mkdirSync(dshHome, { recursive: true })
-      mkdirSync(process.env.WITSEEK_WORKSPACE || defaultWorkspace, { recursive: true })
+      mkdirSync(activeWorkspace, { recursive: true })
       mkdirSync(shellUserData, { recursive: true })
     }
   } catch (error) {
@@ -188,7 +205,7 @@ export function prepareDesktopStorage(): DesktopStorage {
   }
 
   return {
-    data: dataLayout({ dshHome, defaultWorkspace }),
+    data: dataLayout({ dshHome, defaultWorkspace, workspace: activeWorkspace }),
     cacheDir,
     legacyUserData,
     legacyUpdaterCacheDir,

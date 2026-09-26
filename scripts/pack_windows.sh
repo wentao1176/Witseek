@@ -38,6 +38,9 @@ SETUP="$ROOT/artifacts/Witseek-Setup-${VERSION}.exe"
 NSI="$ROOT/artifacts/witseek.nsi"
 YML="$ROOT/artifacts/latest.yml"
 
+echo "== 打包前检查 NSIS 生成器回归用例 =="
+python3 scripts/test_make_nsis.py
+
 # A failed build must never leave a previous latest.yml beside a missing or
 # different-version installer. Rebuild both files as one release pair.
 rm -f "$SETUP" "$YML"
@@ -83,7 +86,7 @@ python3 scripts/make_nsis.py \
   --setup "$SETUP" \
   --version "$VERSION"
 rm -f "$SETUP"
-makensis -V2 "$NSI"
+makensis -NOCD -V2 "$NSI"
 
 echo "== 8/8 生成 electron-updater 更新清单 latest.yml =="
 python3 scripts/make_update_manifest.py --setup "$SETUP" --version "$VERSION" --out "$YML"

@@ -87,6 +87,8 @@ export interface DataLayoutOverrides {
   dshHome?: string
   /** Default workspace before the WITSEEK_WORKSPACE override is applied. */
   defaultWorkspace?: string
+  /** Explicit validated workspace, taking precedence over WITSEEK_WORKSPACE. */
+  workspace?: string
 }
 
 export function dataLayout(overrides: DataLayoutOverrides = {}): DataLayout {
@@ -107,6 +109,7 @@ export function dataLayout(overrides: DataLayoutOverrides = {}): DataLayout {
     // 可用 WITSEEK_WORKSPACE 覆盖（开发/高级用法），
     // 它同时是 dsh 进程 cwd 与右侧文件预览栏的根目录。
     workspace:
+      overrides.workspace ||
       process.env.WITSEEK_WORKSPACE ||
       overrides.defaultWorkspace ||
       path.join(userData, 'workspace'),

@@ -3,6 +3,8 @@
   const { contextBridge, ipcRenderer } = require('electron')
 
   contextBridge.exposeInMainWorld('witseekDesktop', {
+    validateWorkspace: (workspace: string) =>
+      ipcRenderer.invoke('desktop:validate-workspace', workspace),
     setWorkspace: (workspace: string | null) =>
       ipcRenderer.invoke('desktop:set-workspace', workspace)
   })

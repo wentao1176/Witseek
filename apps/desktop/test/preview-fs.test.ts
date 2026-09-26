@@ -31,14 +31,15 @@ let tempRoot = ''
 let workspace = ''
 let dshContents: object
 
-function register(): void {
+function register(protectedPaths: string[] = []): void {
   electronMocks.handlers.clear()
   dshContents = {}
   registerPreviewIpc(
     {} as never,
     { workspace } as never,
     dshContents as never,
-    vi.fn()
+    vi.fn(),
+    protectedPaths
   )
 }
 
@@ -126,6 +127,42 @@ describe('workspace preview IPC', () => {
     vi.stubGlobal('process', { ...process, execPath: path.join(installDir, 'Witseek.exe') })
     register()
 
-    expect(() => callHandler('desktop:set-workspace', projectDir)).toThrow(/安装目录重叠/)
+    expect(() => callHandler('desktop:set-workspace', projectDir)).toThrow(/安装目录或更新缓存重叠/)
+  })
+
+  it('validates a workspace before dsh registers it', () => {
+    const installDir = path.join(tempRoot, 'install')
+    const projectDir = path.join(tempRoot, 'project')
+    mkdirSync(installDir, { recursive: true })
+    mkdirSync(projectDir, { recursive: true })
+    electronMocks.app.isPackaged = true
+    vi.stubGlobal('process', { ...process, execPath: path.join(installDir, 'Witseek.exe') })
+    register()
+
+    expect(callHandler<boolean>('desktop:validate-workspace', projectDir)).toBe(true)
+    expect(() => callHandler('desktop:validate-workspace', installDir)).toThrow(/安装目录或更新缓存重叠/)
+  })
+
+  it('rejects an unsafe packaged workspace before registering preview IPC', () => {
+    const installDir = path.join(tempRoot, 'install')
+    workspace = path.join(installDir, 'project')
+    mkdirSync(workspace, { recursive: true })
+    electronMocks.app.isPackaged = true
+    vi.stubGlobal('process', { ...process, execPath: path.join(installDir, 'Witseek.exe') })
+
+    expect(() => register()).toThrow(/安装目录或更新缓存重叠/)
+  })
+
+  it('rejects workspaces inside the updater cache on startup and workspace changes', () => {
+    const cacheDir = path.join(tempRoot, 'WitseekApp-cache')
+    const cacheWorkspace = path.join(cacheDir, 'project')
+    mkdirSync(cacheWorkspace, { recursive: true })
+    workspace = cacheWorkspace
+
+    expect(() => register([cacheDir])).toThrow(/安装目录或更新缓存重叠/)
+
+    workspace = path.join(tempRoot, 'workspace')
+    register([cacheDir])
+    expect(() => callHandler('desktop:set-workspace', cacheWorkspace)).toThrow(/安装目录或更新缓存重叠/)
   })
 })

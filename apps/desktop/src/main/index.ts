@@ -107,7 +107,8 @@ function bootstrap(): void {
     win,
     data,
     views.mainView.webContents,
-    root => views?.previewView.webContents.send('preview:workspace', root)
+    root => views?.previewView.webContents.send('preview:workspace', root),
+    [prepared.cacheDir]
   )
   ipcMain.handle('preview:resize', (_event, width: number) => {
     views?.setSidebarWidth(width)

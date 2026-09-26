@@ -56,6 +56,12 @@ def main() -> None:
         key=lambda p: len(p.relative_to(src).parts),
         reverse=True,
     )
+    # Reparse checks walk ancestors for package directories and inspect every
+    # packaged file itself, including nested files that File /r may overwrite.
+    package_paths = sorted(
+        set(package_dirs),
+        key=lambda p: p.relative_to(src).as_posix(),
+    )
 
     uninst_key = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Witseek"
     inst_dir = r"$PROFILE\.dsh\WitseekApp"
@@ -99,10 +105,13 @@ def main() -> None:
     a("Var PathOverlap")
     a("Var PathHasReparse")
     a("Var PreviousInstallDir")
+    a("Var InstallInProgressDir")
     a("Var InstallDirEmpty")
     a("Var DirFindHandle")
     a("Var DirFindEntry")
     a("Var CleanupDir")
+    a("Var PayloadRemovalFailed")
+    a("Var ExistingWitseekInstall")
     a("Var ProbeDir")
     a("Var ProbeDirExisted")
     a("Var ProbePath")
@@ -206,11 +215,13 @@ def main() -> None:
         a(r'  StrCpy $PathHasReparse "0"')
         a(r'  StrCpy $PathCurrent "$PathCandidate"')
         a(f"{label_prefix}reparse_check:")
-        a(r'  IfFileExists "$PathCurrent\." ' + f"{label_prefix}reparse_exists {label_prefix}reparse_parent")
+        a(r'  IfFileExists "$PathCurrent\." ' + f"{label_prefix}reparse_exists {label_prefix}reparse_file")
+        a(f"{label_prefix}reparse_file:")
+        a(r'  IfFileExists "$PathCurrent" ' + f"{label_prefix}reparse_exists {label_prefix}reparse_parent")
         a(f"{label_prefix}reparse_exists:")
         a(r'  ClearErrors')
         a(r'  ${GetFileAttributes} "$PathCurrent" "REPARSE_POINT" $0')
-        a(f'  IfErrors {label_prefix}reparse_parent')
+        a(f'  IfErrors {label_prefix}reparse_attribute_failed')
         a(r'  StrCmp $0 "1" ' + f"{label_prefix}reparse_found")
         a(f"{label_prefix}reparse_parent:")
         a(r'  ${GetParent} "$PathCurrent" $PathParent')
@@ -220,15 +231,103 @@ def main() -> None:
         a(f"  Goto {label_prefix}reparse_check")
         a(f"{label_prefix}reparse_found:")
         a(r'  StrCpy $PathHasReparse "1"')
+        a(f'  Goto {label_prefix}reparse_done')
+        a(f"{label_prefix}reparse_attribute_failed:")
+        a(r'  StrCpy $PathHasReparse "2"')
         a(f"{label_prefix}reparse_done:")
         a("FunctionEnd")
         a("")
 
+    for function_prefix in ("", "un."):
+        label_prefix = "un_" if function_prefix else ""
+        a(f"Function {function_prefix}CheckPathSelfReparse")
+        a(r'  StrCpy $PathHasReparse "0"')
+        a(f'  IfFileExists "$PathCandidate" {label_prefix}self_reparse_exists {label_prefix}self_reparse_done')
+        a(f"{label_prefix}self_reparse_exists:")
+        a(r'  ClearErrors')
+        a(r'  ${GetFileAttributes} "$PathCandidate" "REPARSE_POINT" $0')
+        a(f'  IfErrors {label_prefix}self_reparse_attribute_failed')
+        a(r'  StrCmp $0 "1" ' + f"{label_prefix}self_reparse_found")
+        a(f'  Goto {label_prefix}self_reparse_done')
+        a(f"{label_prefix}self_reparse_found:")
+        a(r'  StrCpy $PathHasReparse "1"')
+        a(f'  Goto {label_prefix}self_reparse_done')
+        a(f"{label_prefix}self_reparse_attribute_failed:")
+        a(r'  StrCpy $PathHasReparse "2"')
+        a(f"{label_prefix}self_reparse_done:")
+        a("FunctionEnd")
+        a("")
+
+    # Check package directories and every file that NSIS can overwrite/delete.
+    # This catches directory junctions and file symlinks before payload access.
+    for function_prefix in ("", "un."):
+        label_prefix = "un_" if function_prefix else ""
+        a(f"Function {function_prefix}CheckPayloadReparse")
+        a(r'  StrCpy $PathHasReparse "0"')
+        a(r'  StrCpy $PathCandidate "$CleanupDir\Uninstall Witseek.exe"')
+        a(f"  Call {function_prefix}CheckPathSelfReparse")
+        uninstaller_safe = f"{label_prefix}payload_uninstaller_safe"
+        a(r'  StrCmp $PathHasReparse "0" ' + uninstaller_safe)
+        a(r'  Return')
+        a(f"{uninstaller_safe}:")
+        for index, payload_path in enumerate(package_paths):
+            relative = str(payload_path.relative_to(src)).replace("/", "\\").replace("$", "$$")
+            a(f'  StrCpy $PathCandidate "$CleanupDir\\{relative}"')
+            a(f"  Call {function_prefix}CheckPathReparse")
+            next_label = (
+                f"{label_prefix}check_payload_path_{index + 1}"
+                if index + 1 < len(package_paths)
+                else f"{label_prefix}payload_directories_done"
+            )
+            a(r'  StrCmp $PathHasReparse "0" ' + next_label)
+            a(r'  Return')
+            a(f"{next_label}:")
+        for index, payload_file in enumerate(package_files):
+            relative = str(payload_file.relative_to(src)).replace("/", "\\").replace("$", "$$")
+            a(f'  StrCpy $PathCandidate "$CleanupDir\\{relative}"')
+            a(f"  Call {function_prefix}CheckPathSelfReparse")
+            next_label = (
+                f"{label_prefix}check_payload_file_{index + 1}"
+                if index + 1 < len(package_files)
+                else f"{label_prefix}payload_files_done"
+            )
+            a(r'  StrCmp $PathHasReparse "0" ' + next_label)
+            a(r'  Return')
+            a(f"{next_label}:")
+        a("FunctionEnd")
+        a("")
+
+    # Removing the old pathname before File /r is important on NTFS: writing
+    # through an existing hard link would also overwrite its linked target.
+    a("Function PreparePayloadFilesForInstall")
+    a(r'  StrCmp $ExistingWitseekInstall "1" install_prepare_existing_files')
+    a("  Return")
+    a("install_prepare_existing_files:")
+    for index, payload_file in enumerate(package_files):
+        relative = str(payload_file.relative_to(src)).replace("/", "\\").replace("$", "$$")
+        exists_label = f"install_payload_file_exists_{index}"
+        next_label = f"install_payload_file_next_{index}"
+        a(f'  IfFileExists "$INSTDIR\\{relative}" {exists_label} {next_label}')
+        a(f"{exists_label}:")
+        a("  ClearErrors")
+        a(f'  Delete "$INSTDIR\\{relative}"')
+        a("  IfErrors install_payload_delete_failed")
+        a(f'  IfFileExists "$INSTDIR\\{relative}" install_payload_delete_failed {next_label}')
+        a(f"{next_label}:")
+    a("  Return")
+    a("install_payload_delete_failed:")
+    a('  MessageBox MB_ICONSTOP|MB_OK "无法安全替换已安装的程序文件。为保护链接目标，请关闭 Witseek 后重试。"')
+    a("  Abort")
+    a("FunctionEnd")
+    a("")
+
     a("Function CheckInstallDirEmpty")
     a(r'  StrCpy $InstallDirEmpty "1"')
+    a(r'  IfFileExists "$INSTDIR\." install_dir_exists install_dir_empty_done')
+    a("install_dir_exists:")
     a(r'  ClearErrors')
     a(r'  FindFirst $DirFindHandle $DirFindEntry "$INSTDIR\*"')
-    a(r'  IfErrors install_dir_empty_done')
+    a(r'  IfErrors install_dir_enumeration_failed')
     a("check_install_dir_entry:")
     a(r'  StrCmp $DirFindEntry "." find_next_install_dir_entry')
     a(r'  StrCmp $DirFindEntry ".." find_next_install_dir_entry')
@@ -242,6 +341,9 @@ def main() -> None:
     a(r'  Goto check_install_dir_entry')
     a("install_dir_entries_done:")
     a(r'  FindClose $DirFindHandle')
+    a(r'  Goto install_dir_empty_done')
+    a("install_dir_enumeration_failed:")
+    a(r'  StrCpy $InstallDirEmpty "2"')
     a("install_dir_empty_done:")
     a(r'  Return')
     a("FunctionEnd")
@@ -251,14 +353,47 @@ def main() -> None:
     # then tries non-recursive directory removal from deepest to shallowest.
     # Any user-added file keeps its containing directory intact.
     for function_prefix in ("", "un."):
+        label_prefix = "un_" if function_prefix else ""
         a(f"Function {function_prefix}RemoveOwnedPayload")
-        a(r'  Delete "$CleanupDir\Uninstall Witseek.exe"')
-        for file_path in package_files:
+        a(r'  StrCpy $PayloadRemovalFailed "0"')
+        for index, file_path in enumerate(package_files):
             relative = str(file_path.relative_to(src)).replace("/", "\\").replace("$", "$$")
-            a(f'  Delete "$CleanupDir\\{relative}"')
+            target = f"$CleanupDir\\{relative}"
+            exists_label = f"{label_prefix}remove_payload_file_exists_{index}"
+            failed_label = f"{label_prefix}remove_payload_file_failed_{index}"
+            next_label = f"{label_prefix}remove_payload_file_next_{index}"
+            a(f'  IfFileExists "{target}" {exists_label} {next_label}')
+            a(f"{exists_label}:")
+            a("  ClearErrors")
+            a(f'  Delete "{target}"')
+            a(f"  IfErrors {failed_label}")
+            a(f'  IfFileExists "{target}" {failed_label} {next_label}')
+            a(f"{failed_label}:")
+            a(r'  StrCpy $PayloadRemovalFailed "1"')
+            a("  ClearErrors")
+            a(f"{next_label}:")
         for directory in package_dirs:
             relative = str(directory.relative_to(src)).replace("/", "\\").replace("$", "$$")
+            a("  ClearErrors")
             a(f'  RMDir "$CleanupDir\\{relative}"')
+            a("  ClearErrors")
+        uninstaller_label = f"{label_prefix}remove_owned_uninstaller"
+        uninstaller_exists = f"{label_prefix}remove_uninstaller_exists"
+        uninstaller_failed = f"{label_prefix}remove_uninstaller_failed"
+        uninstaller_done = f"{label_prefix}remove_uninstaller_done"
+        a(f'  StrCmp $PayloadRemovalFailed "0" {uninstaller_label}')
+        a("  Return")
+        a(f"{uninstaller_label}:")
+        a(r'  IfFileExists "$CleanupDir\Uninstall Witseek.exe" ' + uninstaller_exists + " " + uninstaller_done)
+        a(f"{uninstaller_exists}:")
+        a("  ClearErrors")
+        a(r'  Delete "$CleanupDir\Uninstall Witseek.exe"')
+        a(f"  IfErrors {uninstaller_failed}")
+        a(r'  IfFileExists "$CleanupDir\Uninstall Witseek.exe" ' + uninstaller_failed + " " + uninstaller_done)
+        a(f"{uninstaller_failed}:")
+        a(r'  StrCpy $PayloadRemovalFailed "1"')
+        a("  ClearErrors")
+        a(f"{uninstaller_done}:")
         a("FunctionEnd")
         a("")
 
@@ -298,6 +433,7 @@ def main() -> None:
     a("")
 
     a("Function ValidateInstallDir")
+    a(r'  StrCpy $ExistingWitseekInstall "0"')
     a("  Call ComputeInstallCacheDir")
     a(r'  GetFullPathName $NormalizedInstallDir "$INSTDIR"')
     a(r'  GetFullPathName $NormalizedCacheDir "$InstallCacheDir"')
@@ -356,13 +492,35 @@ def main() -> None:
     a(r'  StrCmp $PathOverlap "0" install_path_data_safe')
     a("  Goto install_dir_overlaps_data")
     a("install_path_data_safe:")
+    a(r'  StrCpy $CleanupDir "$NormalizedInstallDir"')
+    a("  Call CheckPayloadReparse")
+    a(r'  StrCmp $PathHasReparse "0" check_previous_install')
+    a("  Goto install_path_uses_reparse")
+    a("check_previous_install:")
     a(r'  ReadRegStr $PreviousInstallDir HKCU "Software\Witseek" ""')
-    a(r'  StrCmp $PreviousInstallDir "" check_install_dir_empty')
+    a(r'  StrCmp $PreviousInstallDir "" check_install_recovery_marker')
     a(r'  GetFullPathName $PreviousInstallDir "$PreviousInstallDir"')
-    a(r'  StrCmp $PreviousInstallDir $NormalizedInstallDir 0 check_install_dir_empty')
-    a(r'  IfFileExists "$INSTDIR\Witseek.exe" 0 check_install_dir_empty')
-    a(r'  IfFileExists "$INSTDIR\Uninstall Witseek.exe" install_dir_is_existing_witseek check_install_dir_empty')
-    a("install_dir_is_existing_witseek:")
+    a(r'  StrCmp $PreviousInstallDir $NormalizedInstallDir 0 check_install_recovery_marker')
+    a(r'  IfFileExists "$INSTDIR\Uninstall Witseek.exe" existing_install_marker')
+    a(r'  IfFileExists "$INSTDIR\Witseek.exe" check_existing_app_resources check_install_recovery_marker')
+    a(r'check_existing_app_resources:')
+    a(r'  IfFileExists "$INSTDIR\resources\app.asar" existing_install_marker check_install_recovery_marker')
+    a("existing_install_marker:")
+    a(r'  StrCpy $ExistingWitseekInstall "1"')
+    a("  Goto install_dir_content_safe")
+    a("check_install_recovery_marker:")
+    a(r'  ReadRegStr $InstallInProgressDir HKCU "Software\Witseek" "InstallInProgress"')
+    a(r'  StrCmp $InstallInProgressDir "" check_install_dir_empty')
+    a(r'  GetFullPathName $InstallInProgressDir "$InstallInProgressDir"')
+    a(r'  StrCmp $InstallInProgressDir $NormalizedInstallDir 0 check_install_dir_empty')
+    a("  Call CheckInstallDirEmpty")
+    a(r'  StrCmp $InstallDirEmpty "1" install_recovery_directory_empty')
+    a('  MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "检测到上次安装中断，但目录已有文件。若继续，只会替换与 Witseek 程序同名的文件；其他文件会保留。是否继续？" IDYES install_recovery_confirmed')
+    a("  Goto install_dir_contains_other_files")
+    a("install_recovery_confirmed:")
+    a(r'  StrCpy $ExistingWitseekInstall "1"')
+    a("  Goto install_dir_content_safe")
+    a("install_recovery_directory_empty:")
     a("  Goto install_dir_content_safe")
     a("check_install_dir_empty:")
     a("  Call CheckInstallDirEmpty")
@@ -397,10 +555,17 @@ def main() -> None:
     a("cache_dir_writable:")
     a("  Return")
     a("install_dir_overlaps_data:")
-    a('  MessageBox MB_ICONSTOP|MB_OK "安装目录或旁置缓存与 dsh 数据或工作区重叠。为保护配置、凭据和项目文件，请选择其他目录。"')
+    a(
+        r'  MessageBox MB_ICONSTOP|MB_OK "安装目录或旁置缓存与 dsh 数据或工作区重叠。'
+        r'$\r$\n安装目录：$NormalizedInstallDir'
+        r'$\r$\n更新缓存：$NormalizedCacheDir'
+        r'$\r$\ndsh 数据：$ProtectedDshHome'
+        r'$\r$\n工作区：$ProtectedWorkspaceDir'
+        r'$\r$\n可以自定义安装路径，请避开以上 dsh 数据目录和工作区。"'
+    )
     a("  Abort")
     a("install_path_uses_reparse:")
-    a('  MessageBox MB_ICONSTOP|MB_OK "安装目录、缓存或 dsh 数据/工作区路径经过 junction/符号链接。为保护项目文件，请改用普通目录后重试。"')
+    a('  MessageBox MB_ICONSTOP|MB_OK "安装目录、缓存、数据/工作区路径或包内路径包含 junction/符号链接，或无法验证路径安全。为保护项目文件，请改用普通目录后重试。"')
     a("  Abort")
     a("install_dir_contains_other_files:")
     a('  MessageBox MB_ICONSTOP|MB_OK "所选目录已包含其他文件。请选择空目录，或选择 Witseek 当前安装目录进行升级。"')
@@ -473,13 +638,18 @@ def main() -> None:
     a("un_check_cache_workspace_overlap:")
     a(r'  StrCpy $PathProtected "$ProtectedWorkspaceDir"')
     a("  Call un.CheckPathOverlap")
-    a(r'  StrCmp $PathOverlap "0" uninstall_path_data_safe')
+    a(r'  StrCmp $PathOverlap "0" uninstall_check_payload_reparse')
     a("  Goto uninstall_dir_overlaps_data")
+    a("uninstall_check_payload_reparse:")
+    a(r'  StrCpy $CleanupDir "$NormalizedInstallDir"')
+    a("  Call un.CheckPayloadReparse")
+    a(r'  StrCmp $PathHasReparse "0" uninstall_path_data_safe')
+    a("  Goto uninstall_dir_uses_reparse")
     a("uninstall_dir_overlaps_data:")
     a('  MessageBox MB_ICONSTOP|MB_OK "卸载已停止：安装目录或旁置缓存与 dsh 数据或工作区重叠。为保护配置、凭据和项目文件，未删除任何文件。"')
     a("  Abort")
     a("uninstall_dir_uses_reparse:")
-    a('  MessageBox MB_ICONSTOP|MB_OK "卸载已停止：安装目录、缓存或数据路径包含 junction/符号链接。请移除路径重定向后重试；未删除文件。"')
+    a('  MessageBox MB_ICONSTOP|MB_OK "卸载已停止：安装目录、缓存或数据路径包含 junction/符号链接，或无法验证路径安全。请移除路径重定向后重试；未删除文件。"')
     a("  Abort")
     a("uninstall_path_data_safe:")
     a("FunctionEnd")
@@ -505,8 +675,12 @@ def main() -> None:
     a(r'  StrCmp $PathOverlap "0" old_install_cleanup_safe')
     a("  Goto old_install_cleanup_overlaps_data")
     a("old_install_cleanup_safe:")
-    a(r'  Delete "$DESKTOP\Witseek.lnk"')
     a(r'  StrCpy $CleanupDir "$LegacyDefaultInstallDir"')
+    a("  Call CheckPayloadReparse")
+    a(r'  StrCmp $PathHasReparse "0" old_install_cleanup_payload_safe')
+    a("  Goto old_install_cleanup_reparse")
+    a("old_install_cleanup_payload_safe:")
+    a(r'  Delete "$DESKTOP\Witseek.lnk"')
     a(r'  Call RemoveOwnedPayload')
     a(r'  RMDir "$LegacyDefaultInstallDir"')
     a(r'  IfFileExists "$LegacyDefaultInstallDir\." old_install_cleanup_failed old_install_cleanup_done')
@@ -525,7 +699,16 @@ def main() -> None:
     # ---- 安装：核心文件 ----
     a('Section "Witseek 核心文件（必需，含 DeepSeek Harness 运行时）" SecCore')
     a("SectionIn RO")
+    a("  Call ValidateInstallDir")
     a("  Call ComputeInstallCacheDir")
+    a(r'  WriteRegStr HKCU "Software\Witseek" "InstallInProgress" "$INSTDIR"')
+    a("  IfErrors install_recovery_marker_failed")
+    a("  Goto install_recovery_marker_ready")
+    a("install_recovery_marker_failed:")
+    a('  MessageBox MB_ICONSTOP|MB_OK "无法记录安装恢复状态，尚未更改程序文件。请检查当前用户注册表权限后重试。"')
+    a("  Abort")
+    a("install_recovery_marker_ready:")
+    a("  Call PreparePayloadFilesForInstall")
     a(r'  SetOutPath "$INSTDIR"')
     for f in top_files:
         a(f"  File {nsis_quote(str(f))}")
@@ -533,8 +716,30 @@ def main() -> None:
         a(f'  SetOutPath "$INSTDIR\\{d.name}"')
         a(f"  File /r {nsis_quote(str(d) + '/*')}")
     a("")
+    # Keep the existing uninstaller until the new payload has been extracted,
+    # so a failed update can still be retried or removed.
+    a(r'  StrCpy $PathCandidate "$INSTDIR\Uninstall Witseek.exe"')
+    a("  Call CheckPathSelfReparse")
+    a(r'  StrCmp $PathHasReparse "0" install_old_uninstaller_safe')
+    a('  MessageBox MB_ICONSTOP|MB_OK "无法安全替换旧卸载器路径。为保护链接目标，请清理路径重定向后重试。"')
+    a("  Abort")
+    a("install_old_uninstaller_safe:")
+    a("  ClearErrors")
+    a(r'  Delete "$INSTDIR\Uninstall Witseek.exe"')
+    a("  IfErrors install_uninstaller_replace_failed")
+    a(r'  IfFileExists "$INSTDIR\Uninstall Witseek.exe" install_uninstaller_replace_failed install_write_uninstaller')
+    a("install_uninstaller_replace_failed:")
+    a('  MessageBox MB_ICONSTOP|MB_OK "新版文件已复制，但旧卸载器仍被占用。关闭 Witseek 后重新运行安装程序以完成更新；原卸载入口仍保留。"')
+    a("  Abort")
+    a("install_write_uninstaller:")
     a(r'  SetOutPath "$INSTDIR"')
     a(f'  WriteUninstaller "{uninst_path}"')
+    a("  IfErrors install_uninstaller_write_failed")
+    a(r'  IfFileExists "$INSTDIR\Uninstall Witseek.exe" install_uninstaller_write_succeeded install_uninstaller_write_failed')
+    a("install_uninstaller_write_failed:")
+    a('  MessageBox MB_ICONSTOP|MB_OK "程序文件已复制，但卸载器创建失败。请保留此目录并重新运行安装程序以修复。"')
+    a("  Abort")
+    a("install_uninstaller_write_succeeded:")
     a(r'  WriteRegStr HKCU "Software\Witseek" "CacheDir" "$InstallCacheDir"')
     a(r'  WriteRegDWORD HKCU "Software\Witseek" "CacheOwned" $CacheOwned')
     a(r'  WriteRegStr HKCU "Software\Witseek" "DshHome" "$ProtectedDshHome"')
@@ -550,6 +755,13 @@ def main() -> None:
     a(f"  WriteRegStr HKCU \"{uninst_key}\" \"QuietUninstallString\" '{uninst_path} /S'")
     a(f'  WriteRegDWORD HKCU "{uninst_key}" "NoModify" 1')
     a(f'  WriteRegDWORD HKCU "{uninst_key}" "NoRepair" 1')
+    a("  ClearErrors")
+    a(r'  DeleteRegValue HKCU "Software\Witseek" "InstallInProgress"')
+    a("  IfErrors install_recovery_marker_cleanup_failed")
+    a("  Goto install_recovery_marker_cleanup_done")
+    a("install_recovery_marker_cleanup_failed:")
+    a('  MessageBox MB_ICONEXCLAMATION|MB_OK "Witseek 已安装，但临时恢复标记未能清除。之后在同一目录重新安装时，安装程序会再次确认。"')
+    a("install_recovery_marker_cleanup_done:")
     a("")
     a(f'  CreateDirectory "{sm_dir}"')
     a(f'  CreateShortcut "{sm_lnk}" "{exe_path}" "" "{exe_path}" 0')
@@ -571,6 +783,12 @@ def main() -> None:
 
     # ---- 卸载 ----
     a("Section Uninstall")
+    a(r'  StrCpy $CleanupDir "$INSTDIR"')
+    a(r'  Call un.CheckPayloadReparse')
+    a(r'  StrCmp $PathHasReparse "0" uninstall_payload_path_safe')
+    a('  MessageBox MB_ICONSTOP|MB_OK "卸载已停止：包内路径包含 junction/符号链接，或无法验证路径安全。未删除文件。"')
+    a("  Abort")
+    a("uninstall_payload_path_safe:")
     a(r'  ReadRegStr $InstallCacheDir HKCU "Software\Witseek" "CacheDir"')
     a(r'  ReadRegDWORD $CacheOwned HKCU "Software\Witseek" "CacheOwned"')
     a(r'  ${GetParent} "$INSTDIR" $CacheParent')
@@ -581,10 +799,16 @@ def main() -> None:
     a(r'  StrCpy $InstallCacheDir $ExpectedCacheDir')
     a("cache_path_ready:")
     a(r'  StrCmp $CacheOwned "1" 0 cache_cleanup_done')
-    a(r'  RMDir /r "$InstallCacheDir"')
+    # The updater cache may contain user-created junctions. Remove only when
+    # empty; recursive deletion could escape the cache directory.
+    a(r'  RMDir "$InstallCacheDir"')
     a("cache_cleanup_done:")
     a(r'  StrCpy $CleanupDir "$INSTDIR"')
     a(r'  Call un.RemoveOwnedPayload')
+    a(r'  StrCmp $PayloadRemovalFailed "0" uninstall_payload_removal_complete')
+    a('  MessageBox MB_ICONEXCLAMATION|MB_OK "部分程序文件仍在使用或无法删除，卸载注册信息已保留。请关闭 Witseek 后重试：$INSTDIR"')
+    a("  Abort")
+    a("uninstall_payload_removal_complete:")
     a(f'  Delete "{desktop_lnk}"')
     a(f'  Delete "{sm_lnk}"')
     a(f'  Delete "{sm_uninst_lnk}"')

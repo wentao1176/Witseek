@@ -17,8 +17,18 @@ window.__ModuleLoader__.load({
 			return null
 		}
 
-		const inject = ['slots']
+		const inject = ['slots', 'workspaces']
 		function apply(ctx) {
+			const workspaces = ctx.get('workspaces')
+			const createWorkspace = workspaces.create.bind(workspaces)
+			workspaces.create = async (input) => {
+				const bridge = globalThis.witseekDesktop
+				if (typeof bridge?.validateWorkspace === 'function') {
+					await bridge.validateWorkspace(input.path)
+				}
+				return createWorkspace(input)
+			}
+
 			ctx.effect(() => ctx.slots.inject('conversation.session.header.actions', () =>
 				ctx.slots.register({
 					name: 'conversation.session.header.actions',

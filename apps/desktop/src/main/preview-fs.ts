@@ -12,6 +12,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { closeSync, openSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { DataLayout } from './paths'
+import { pathsOverlap, resolveForPathSafety } from './path-safety'
 
 export interface DirEntry {
   name: string
@@ -462,11 +463,21 @@ export function registerPreviewIpc(
   win: BrowserWindow,
   data: DataLayout,
   dshContents: WebContents,
-  onWorkspaceChange: (info: RootInfo) => void
+  onWorkspaceChange: (info: RootInfo) => void,
+  protectedPaths: string[] = []
 ): void {
   const fallbackRoot = realpathSync(data.workspace)
+  const protectedRoots = [
+    ...(app.isPackaged ? [resolveForPathSafety(path.dirname(process.execPath))] : []),
+    ...protectedPaths.map(resolveForPathSafety)
+  ]
+  function assertWorkspaceIsSafe(candidate: string): void {
+    if (protectedRoots.some(protectedRoot => pathsOverlap(protectedRoot, candidate))) {
+      throw new Error('工作区不能与 Witseek 安装目录或更新缓存重叠')
+    }
+  }
+  assertWorkspaceIsSafe(fallbackRoot)
   let root = fallbackRoot
-  const installDir = app.isPackaged ? path.dirname(process.execPath) : null
   // 用户通过“打开文件…”系统选择框显式选中的工作区外文件，会话内允许系统打开/定位
   const granted = new Set<string>()
 
@@ -480,9 +491,7 @@ export function registerPreviewIpc(
     }
     const target = candidate === null ? fallbackRoot : realpathSync(path.resolve(candidate))
     if (!statSync(target).isDirectory()) throw new Error('工作区路径不是文件夹')
-    if (installDir && (isWithin(installDir, target) || isWithin(target, installDir))) {
-      throw new Error('工作区不能与 Witseek 安装目录重叠')
-    }
+    assertWorkspaceIsSafe(target)
     const samePath = process.platform === 'win32'
       ? target.toLocaleLowerCase() === root.toLocaleLowerCase()
       : target === root
@@ -507,6 +516,17 @@ export function registerPreviewIpc(
   ipcMain.handle('desktop:set-workspace', (event, candidate: unknown) => {
     if (event.sender !== dshContents) throw new Error('工作区只能由 dsh 主视图更新')
     return setWorkspace(candidate)
+  })
+
+  ipcMain.handle('desktop:validate-workspace', (event, candidate: unknown) => {
+    if (event.sender !== dshContents) throw new Error('工作区只能由 dsh 主视图验证')
+    if (typeof candidate !== 'string' || !path.isAbsolute(candidate)) {
+      throw new Error('工作区路径必须是绝对路径')
+    }
+    const target = realpathSync(path.resolve(candidate))
+    if (!statSync(target).isDirectory()) throw new Error('工作区路径不是文件夹')
+    assertWorkspaceIsSafe(target)
+    return true
   })
 
   ipcMain.handle('preview:root', () => rootInfo())
